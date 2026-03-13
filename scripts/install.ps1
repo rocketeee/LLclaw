@@ -77,13 +77,16 @@ function Invoke-WslScript {
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($tempFile, $Script.Replace("`r`n", "`n"), $utf8NoBom)
 
-    # 将 Windows 路径转为 WSL 路径
-    $winPath = $tempFile.Replace('\', '\\')
+    # 手动将 Windows 路径转为 WSL /mnt/ 路径（不依赖 wslpath，避免转义问题）
+    # 例: C:\Users\test\file.sh -> /mnt/c/Users/test/file.sh
+    $driveLetter = $tempFile.Substring(0, 1).ToLower()
+    $restPath = $tempFile.Substring(2).Replace('\', '/')
+    $wslFilePath = "/mnt/$driveLetter$restPath"
     $wslTempPath = "/tmp/llclaw_$(Get-Random).sh"
 
     try {
-        # 复制脚本到 WSL 并执行
-        wsl -- bash -c "cp '$(wsl wslpath -u $tempFile)' '$wslTempPath' && chmod +x '$wslTempPath' && bash '$wslTempPath' 2>&1; EXIT_CODE=`$?; rm -f '$wslTempPath'; exit `$EXIT_CODE" 2>&1 | ForEach-Object {
+        # 复制脚本到 WSL /tmp 并执行（避免权限和路径问题）
+        wsl -- bash -c "cp '$wslFilePath' '$wslTempPath' 2>/dev/null && chmod +x '$wslTempPath' && bash '$wslTempPath' 2>&1; EXIT_CODE=`$?; rm -f '$wslTempPath'; exit `$EXIT_CODE" 2>&1 | ForEach-Object {
             $line = $_.ToString()
             if ($line -match "^\[OK\]") { Write-OK ($line -replace "^\[OK\]\s*", "") }
             elseif ($line -match "^\[FAIL\]") { Write-Err ($line -replace "^\[FAIL\]\s*", "") }
