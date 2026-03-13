@@ -22,7 +22,7 @@
 .PARAMETER ExportConfig
     卸载前自动导出配置到指定路径
 .NOTES
-    版本: 1.0.0
+    版本: 1.4.0
     项目: https://github.com/rocketeee/LLclaw
 .EXAMPLE
     # 交互式卸载（推荐）
@@ -57,6 +57,11 @@ $script:RemovedComponents = @()
 $script:SkippedComponents = @()
 $script:Errors = @()
 
+# ===== 编码修复 =====
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:WSL_UTF8 = "1"
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # ===== 颜色输出函数 =====
 function Write-Step  { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [LLclaw] " -ForegroundColor Cyan -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [STEP] $msg" }
 function Write-OK    { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [  OK  ] " -ForegroundColor Green -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [OK] $msg" }
@@ -64,16 +69,52 @@ function Write-Warn  { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host
 function Write-Err   { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [ERROR ] " -ForegroundColor Red -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [ERROR] $msg"; $script:Errors += $msg }
 function Write-Info  { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [ INFO ] " -ForegroundColor DarkGray -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [INFO] $msg" }
 
+# ===== 安全执行 WSL bash 脚本 =====
+function Invoke-WslScript {
+    param(
+        [string[]]$Lines,
+        [string]$Description = "WSL script"
+    )
+
+    $scriptContent = ($Lines -join "`n") + "`n"
+
+    $tempFile = Join-Path $env:TEMP ("llclaw_" + [System.IO.Path]::GetRandomFileName() + ".sh")
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($tempFile, $scriptContent, $utf8NoBom)
+
+    $driveLetter = $tempFile.Substring(0, 1).ToLower()
+    $restPath = $tempFile.Substring(2).Replace('\', '/')
+    $wslFilePath = "/mnt/$driveLetter$restPath"
+    $wslTempPath = "/tmp/llclaw_" + (Get-Random) + ".sh"
+
+    try {
+        wsl -- bash -c "cp '$wslFilePath' '$wslTempPath' && chmod +x '$wslTempPath' && bash '$wslTempPath' 2>&1; EC=`$?; rm -f '$wslTempPath'; exit `$EC" 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            if ($line -match "^\[OK\]") { Write-OK ($line -replace "^\[OK\]\s*", "") }
+            elseif ($line -match "^\[FAIL\]") { Write-Err ($line -replace "^\[FAIL\]\s*", "") }
+            elseif ($line -match "^\[WARN\]") { Write-Warn ($line -replace "^\[WARN\]\s*", "") }
+            elseif ($line -match "^\[LLclaw\]") { Write-Step ($line -replace "^\[LLclaw\]\s*", "") }
+            elseif ($line -match "^\[INFO\]") { Write-Info ($line -replace "^\[INFO\]\s*", "") }
+            elseif ($line.Trim() -match "^\d+$") { <# 忽略纯数字行 #> }
+            else { Write-Info "  $line" }
+        }
+    } catch {
+        Write-Err "WSL 脚本执行失败: $_"
+    } finally {
+        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ===== Banner =====
 function Show-Banner {
     Write-Host ""
-    Write-Host "  ╔═══════════════════════════════════════════════════════╗" -ForegroundColor Red
-    Write-Host "  ║                                                       ║" -ForegroundColor Red
-    Write-Host "  ║   LLclaw - OpenClaw Windows 11 一键卸载工具 v1.0.0   ║" -ForegroundColor Red
-    Write-Host "  ║                                                       ║" -ForegroundColor Red
-    Write-Host "  ║   安全卸载 · 选择性清理 · 配置备份 · 完整日志       ║" -ForegroundColor Red
-    Write-Host "  ║                                                       ║" -ForegroundColor Red
-    Write-Host "  ╚═══════════════════════════════════════════════════════╝" -ForegroundColor Red
+    Write-Host "  =========================================================" -ForegroundColor Red
+    Write-Host "                                                             " -ForegroundColor Red
+    Write-Host "    LLclaw - OpenClaw Windows 11 一键卸载工具 v1.4.0        " -ForegroundColor Red
+    Write-Host "                                                             " -ForegroundColor Red
+    Write-Host "    安全卸载 | 选择性清理 | 配置备份 | 完整日志             " -ForegroundColor Red
+    Write-Host "                                                             " -ForegroundColor Red
+    Write-Host "  =========================================================" -ForegroundColor Red
     Write-Host ""
 }
 
@@ -108,7 +149,6 @@ function Get-InstalledComponents {
         ConfigFiles = $false
     }
 
-    # 检测 OpenClaw
     try {
         $wslCheck = wsl bash -c "command -v openclaw" 2>&1
         if ($LASTEXITCODE -eq 0 -and $wslCheck) {
@@ -121,7 +161,6 @@ function Get-InstalledComponents {
         Write-Info "OpenClaw: 未检测到"
     }
 
-    # 检测 Node.js
     try {
         $wslCheck = wsl bash -c "command -v node" 2>&1
         if ($LASTEXITCODE -eq 0 -and $wslCheck) {
@@ -135,7 +174,6 @@ function Get-InstalledComponents {
         Write-Info "Node.js: 未检测到"
     }
 
-    # 检测 WSL
     try {
         $wslList = wsl --list --quiet 2>&1
         if ($LASTEXITCODE -eq 0 -and $wslList) {
@@ -148,7 +186,6 @@ function Get-InstalledComponents {
         Write-Info "WSL2: 未检测到"
     }
 
-    # 检测 Ollama
     try {
         $wslCheck = wsl bash -c "command -v ollama" 2>&1
         if ($LASTEXITCODE -eq 0 -and $wslCheck) {
@@ -161,7 +198,6 @@ function Get-InstalledComponents {
         Write-Info "Ollama: 未检测到"
     }
 
-    # 检测 Docker 容器
     try {
         $dockerContainers = docker ps -a --filter "name=openclaw" --format "{{.Names}}" 2>&1
         if ($LASTEXITCODE -eq 0 -and $dockerContainers) {
@@ -174,9 +210,8 @@ function Get-InstalledComponents {
         Write-Info "Docker: 未安装或未运行"
     }
 
-    # 检测配置文件
     try {
-        $configCheck = wsl bash -c "test -f ~/.openclaw/openclaw.json && echo 'exists'" 2>&1
+        $configCheck = wsl bash -c "test -f ~/.openclaw/openclaw.json && echo exists" 2>&1
         if ($configCheck -match "exists") {
             $components.ConfigFiles = $true
             Write-OK "配置文件: ~/.openclaw/ 存在"
@@ -202,42 +237,34 @@ function Export-ConfigBeforeUninstall {
     }
 
     try {
-        $exportScript = @"
-#!/bin/bash
-if [ -f ~/.openclaw/openclaw.json ]; then
-    cat ~/.openclaw/openclaw.json
-else
-    echo "CONFIG_NOT_FOUND"
-fi
-"@
-        $configContent = $exportScript | wsl bash 2>&1
+        $scriptLines = @(
+            '#!/bin/bash'
+            'if [ -f ~/.openclaw/openclaw.json ]; then'
+            '    cat ~/.openclaw/openclaw.json'
+            'else'
+            '    echo "CONFIG_NOT_FOUND"'
+            'fi'
+        )
+
+        $scriptContent = ($scriptLines -join "`n") + "`n"
+        $tempFile = Join-Path $env:TEMP ("llclaw_export_" + [System.IO.Path]::GetRandomFileName() + ".sh")
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($tempFile, $scriptContent, $utf8NoBom)
+
+        $driveLetter = $tempFile.Substring(0, 1).ToLower()
+        $restPath = $tempFile.Substring(2).Replace('\', '/')
+        $wslFilePath = "/mnt/$driveLetter$restPath"
+
+        $configContent = wsl -- bash -c "bash '$wslFilePath'" 2>&1
+        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
 
         if ($configContent -match "CONFIG_NOT_FOUND") {
-            Write-Warn "未找到配置文件，跳过导出"
+            Write-Warn "未找到配置文件, 跳过导出"
             return
         }
 
         $configContent | Set-Content -Path $ExportConfig -Encoding UTF8
         Write-OK "配置已导出到: $ExportConfig"
-
-        # 同时导出备份目录
-        $backupDir = "$exportDir\openclaw-backups"
-        if (-not (Test-Path $backupDir)) {
-            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-        }
-
-        $backupScript = "ls ~/.openclaw/backups/ 2>/dev/null"
-        $backups = $backupScript | wsl bash 2>&1
-        if ($backups) {
-            Write-Info "正在导出备份文件..."
-            foreach ($backup in $backups -split "`n") {
-                if ($backup.Trim()) {
-                    $content = "cat ~/.openclaw/backups/$backup" | wsl bash 2>&1
-                    $content | Set-Content -Path "$backupDir\$backup" -Encoding UTF8
-                }
-            }
-            Write-OK "备份文件已导出到: $backupDir"
-        }
     } catch {
         Write-Err "配置导出失败: $_"
     }
@@ -247,32 +274,29 @@ fi
 function Stop-OpenClawServices {
     Write-Step "正在停止 OpenClaw 相关服务..."
 
-    # 停止 WSL 中的 OpenClaw 进程
+    $scriptLines = @(
+        '#!/bin/bash'
+        'if pgrep -f "openclaw" > /dev/null 2>&1; then'
+        '    pkill -f "openclaw" 2>/dev/null'
+        '    echo "[OK] OpenClaw 进程已终止"'
+        'else'
+        '    echo "[INFO] 未发现运行中的 OpenClaw 进程"'
+        'fi'
+        ''
+        'if systemctl is-active --quiet openclaw 2>/dev/null; then'
+        '    sudo systemctl stop openclaw 2>/dev/null'
+        '    sudo systemctl disable openclaw 2>/dev/null'
+        '    echo "[OK] OpenClaw 守护进程已停止并禁用"'
+        'fi'
+        ''
+        'if pgrep -f "ollama" > /dev/null 2>&1; then'
+        '    pkill -f "ollama" 2>/dev/null'
+        '    echo "[OK] Ollama 进程已终止"'
+        'fi'
+    )
+
     try {
-        $stopScript = @"
-#!/bin/bash
-# 停止 OpenClaw Gateway
-if pgrep -f "openclaw" > /dev/null 2>&1; then
-    pkill -f "openclaw" 2>/dev/null
-    echo "OpenClaw 进程已终止"
-else
-    echo "未发现运行中的 OpenClaw 进程"
-fi
-
-# 停止 OpenClaw daemon
-if systemctl is-active --quiet openclaw 2>/dev/null; then
-    sudo systemctl stop openclaw 2>/dev/null
-    sudo systemctl disable openclaw 2>/dev/null
-    echo "OpenClaw daemon 已停止并禁用"
-fi
-
-# 停止 Ollama
-if pgrep -f "ollama" > /dev/null 2>&1; then
-    pkill -f "ollama" 2>/dev/null
-    echo "Ollama 进程已终止"
-fi
-"@
-        $stopScript | wsl bash 2>&1 | ForEach-Object { Write-Info "  $_" }
+        Invoke-WslScript -Lines $scriptLines -Description "Stop services"
         Write-OK "服务已停止"
     } catch {
         Write-Warn "停止服务时出现警告: $_"
@@ -283,43 +307,35 @@ fi
 function Remove-OpenClaw {
     Write-Step "正在卸载 OpenClaw..."
 
+    $scriptLines = @(
+        '#!/bin/bash'
+        'set -e'
+        ''
+        'echo "[LLclaw] 正在卸载 openclaw npm 包..."'
+        'npm uninstall -g openclaw 2>/dev/null && echo "[OK] npm 包已卸载" || echo "[WARN] npm 包卸载跳过"'
+        ''
+        'if [ -f /etc/systemd/system/openclaw.service ]; then'
+        '    sudo systemctl stop openclaw 2>/dev/null || true'
+        '    sudo systemctl disable openclaw 2>/dev/null || true'
+        '    sudo rm -f /etc/systemd/system/openclaw.service'
+        '    sudo systemctl daemon-reload'
+        '    echo "[OK] systemd 服务已移除"'
+        'fi'
+        ''
+        'if [ -f ~/.config/systemd/user/openclaw.service ]; then'
+        '    systemctl --user stop openclaw 2>/dev/null || true'
+        '    systemctl --user disable openclaw 2>/dev/null || true'
+        '    rm -f ~/.config/systemd/user/openclaw.service'
+        '    systemctl --user daemon-reload'
+        '    echo "[OK] 用户级 systemd 服务已移除"'
+        'fi'
+        ''
+        'echo "[OK] OpenClaw 卸载完成"'
+    )
+
     try {
-        $removeScript = @"
-#!/bin/bash
-set -e
-
-# 卸载全局 npm 包
-echo "卸载 openclaw npm 包..."
-npm uninstall -g openclaw 2>/dev/null && echo "[OK] npm 包已卸载" || echo "[WARN] npm 包卸载跳过"
-
-# 移除 daemon 服务文件
-if [ -f /etc/systemd/system/openclaw.service ]; then
-    sudo systemctl stop openclaw 2>/dev/null || true
-    sudo systemctl disable openclaw 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/openclaw.service
-    sudo systemctl daemon-reload
-    echo "[OK] systemd 服务已移除"
-fi
-
-# 移除用户级 systemd 服务
-if [ -f ~/.config/systemd/user/openclaw.service ]; then
-    systemctl --user stop openclaw 2>/dev/null || true
-    systemctl --user disable openclaw 2>/dev/null || true
-    rm -f ~/.config/systemd/user/openclaw.service
-    systemctl --user daemon-reload
-    echo "[OK] 用户级 systemd 服务已移除"
-fi
-
-echo "[OK] OpenClaw 卸载完成"
-"@
-        $removeScript | wsl bash 2>&1 | ForEach-Object {
-            if ($_ -match "^\[OK\]") { Write-OK ($_ -replace "^\[OK\] ", "") }
-            elseif ($_ -match "^\[WARN\]") { Write-Warn ($_ -replace "^\[WARN\] ", "") }
-            else { Write-Info "  $_" }
-        }
-
+        Invoke-WslScript -Lines $scriptLines -Description "Remove OpenClaw"
         $script:RemovedComponents += "OpenClaw"
-        Write-OK "OpenClaw 卸载完成 ✓"
     } catch {
         Write-Err "OpenClaw 卸载失败: $_"
     }
@@ -346,36 +362,29 @@ function Remove-ConfigFiles {
 
     Write-Step "正在清理配置文件..."
 
+    $scriptLines = @(
+        '#!/bin/bash'
+        'if [ -d ~/.openclaw ]; then'
+        '    BACKUP_PATH="/tmp/openclaw-backup-$(date +%Y%m%d-%H%M%S).tar.gz"'
+        '    tar -czf "$BACKUP_PATH" -C ~ .openclaw 2>/dev/null'
+        '    echo "[INFO] 安全备份已创建: $BACKUP_PATH"'
+        '    rm -rf ~/.openclaw'
+        '    echo "[OK] 配置目录 ~/.openclaw 已删除"'
+        'else'
+        '    echo "[INFO] 配置目录不存在, 跳过"'
+        'fi'
+        ''
+        'npm cache ls 2>/dev/null | grep openclaw | while read line; do'
+        '    npm cache clean --force 2>/dev/null'
+        '    echo "[OK] npm 缓存已清理"'
+        '    break'
+        'done'
+    )
+
     try {
-        $cleanScript = @"
-#!/bin/bash
-# 备份到临时位置（以防万一）
-if [ -d ~/.openclaw ]; then
-    BACKUP_PATH="/tmp/openclaw-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
-    tar -czf "\$BACKUP_PATH" -C ~ .openclaw 2>/dev/null
-    echo "[INFO] 安全备份已创建: \$BACKUP_PATH"
-
-    rm -rf ~/.openclaw
-    echo "[OK] 配置目录 ~/.openclaw 已删除"
-else
-    echo "[INFO] 配置目录不存在，跳过"
-fi
-
-# 清理 npm 缓存中的 openclaw 相关内容
-npm cache ls 2>/dev/null | grep openclaw | while read line; do
-    npm cache clean --force 2>/dev/null
-    echo "[OK] npm 缓存已清理"
-    break
-done
-"@
-        $cleanScript | wsl bash 2>&1 | ForEach-Object {
-            if ($_ -match "^\[OK\]") { Write-OK ($_ -replace "^\[OK\] ", "") }
-            elseif ($_ -match "^\[INFO\]") { Write-Info ($_ -replace "^\[INFO\] ", "") }
-            else { Write-Info "  $_" }
-        }
-
+        Invoke-WslScript -Lines $scriptLines -Description "Clean config"
         $script:RemovedComponents += "配置文件"
-        Write-OK "配置文件清理完成 ✓"
+        Write-OK "配置文件清理完成"
     } catch {
         Write-Err "配置文件清理失败: $_"
     }
@@ -398,46 +407,38 @@ function Remove-Ollama {
 
     Write-Step "正在卸载 Ollama..."
 
+    $scriptLines = @(
+        '#!/bin/bash'
+        'if systemctl is-active --quiet ollama 2>/dev/null; then'
+        '    sudo systemctl stop ollama'
+        '    sudo systemctl disable ollama'
+        '    echo "[OK] Ollama 服务已停止"'
+        'fi'
+        ''
+        'if [ -f /usr/local/bin/ollama ]; then'
+        '    sudo rm -f /usr/local/bin/ollama'
+        '    echo "[OK] Ollama 二进制已删除"'
+        'fi'
+        ''
+        'sudo rm -f /etc/systemd/system/ollama.service'
+        'sudo systemctl daemon-reload 2>/dev/null'
+        ''
+        'if [ -d ~/.ollama ]; then'
+        '    SIZE=$(du -sh ~/.ollama 2>/dev/null | cut -f1)'
+        '    rm -rf ~/.ollama'
+        '    echo "[OK] Ollama 模型数据已删除 (释放 $SIZE)"'
+        'fi'
+        ''
+        'sudo userdel ollama 2>/dev/null || true'
+        'sudo groupdel ollama 2>/dev/null || true'
+        ''
+        'echo "[OK] Ollama 卸载完成"'
+    )
+
     try {
-        $removeScript = @"
-#!/bin/bash
-# 停止 Ollama 服务
-if systemctl is-active --quiet ollama 2>/dev/null; then
-    sudo systemctl stop ollama
-    sudo systemctl disable ollama
-    echo "[OK] Ollama 服务已停止"
-fi
-
-# 移除 Ollama 二进制
-if [ -f /usr/local/bin/ollama ]; then
-    sudo rm -f /usr/local/bin/ollama
-    echo "[OK] Ollama 二进制已删除"
-fi
-
-# 移除 systemd 服务文件
-sudo rm -f /etc/systemd/system/ollama.service
-sudo systemctl daemon-reload 2>/dev/null
-
-# 移除模型数据
-if [ -d ~/.ollama ]; then
-    SIZE=\$(du -sh ~/.ollama 2>/dev/null | cut -f1)
-    rm -rf ~/.ollama
-    echo "[OK] Ollama 模型数据已删除 (释放 \$SIZE)"
-fi
-
-# 移除 Ollama 用户和组
-sudo userdel ollama 2>/dev/null || true
-sudo groupdel ollama 2>/dev/null || true
-
-echo "[OK] Ollama 卸载完成"
-"@
-        $removeScript | wsl bash 2>&1 | ForEach-Object {
-            if ($_ -match "^\[OK\]") { Write-OK ($_ -replace "^\[OK\] ", "") }
-            else { Write-Info "  $_" }
-        }
-
+        Invoke-WslScript -Lines $scriptLines -Description "Remove Ollama"
         $script:RemovedComponents += "Ollama"
-        Write-OK "Ollama 卸载完成 ✓"
+        Write-OK "Ollama 卸载完成"
     } catch {
         Write-Err "Ollama 卸载失败: $_"
     }
@@ -453,7 +454,6 @@ function Remove-DockerContainers {
     Write-Step "正在清理 Docker 容器..."
 
     try {
-        # 停止并移除 OpenClaw 相关容器
         $containers = docker ps -a --filter "name=openclaw" --filter "name=ollama-engine" --filter "name=vllm-engine" --format "{{.Names}}" 2>&1
         if ($containers) {
             foreach ($container in $containers -split "`n") {
@@ -466,7 +466,6 @@ function Remove-DockerContainers {
             }
         }
 
-        # 移除相关镜像
         $images = docker images --filter "reference=openclaw/*" --filter "reference=ollama/*" --filter "reference=vllm/*" --format "{{.Repository}}:{{.Tag}}" 2>&1
         if ($images) {
             foreach ($image in $images -split "`n") {
@@ -478,7 +477,6 @@ function Remove-DockerContainers {
             }
         }
 
-        # 移除 Docker volumes
         $volumes = docker volume ls --filter "name=ollama" --filter "name=vllm" --format "{{.Name}}" 2>&1
         if ($volumes) {
             foreach ($vol in $volumes -split "`n") {
@@ -490,7 +488,6 @@ function Remove-DockerContainers {
             }
         }
 
-        # 清理部署目录
         $deployDir = "$env:USERPROFILE\openclaw-deploy"
         if (Test-Path $deployDir) {
             Remove-Item -Recurse -Force $deployDir
@@ -498,7 +495,7 @@ function Remove-DockerContainers {
         }
 
         $script:RemovedComponents += "Docker 容器/镜像"
-        Write-OK "Docker 清理完成 ✓"
+        Write-OK "Docker 清理完成"
     } catch {
         Write-Warn "Docker 清理时出现警告: $_"
     }
@@ -523,34 +520,29 @@ function Remove-NodeJS {
 
     Write-Step "正在卸载 WSL 中的 Node.js..."
 
+    $scriptLines = @(
+        '#!/bin/bash'
+        'set -e'
+        ''
+        'echo "[LLclaw] 正在卸载 Node.js..."'
+        'sudo apt-get purge -y nodejs 2>/dev/null || true'
+        'sudo apt-get autoremove -y 2>/dev/null || true'
+        ''
+        'sudo rm -f /etc/apt/sources.list.d/nodesource.list'
+        'sudo rm -f /etc/apt/keyrings/nodesource.gpg'
+        ''
+        'sudo rm -rf /usr/local/lib/node_modules'
+        'sudo rm -rf /usr/local/include/node'
+        'rm -rf ~/.npm'
+        'rm -rf ~/.node-gyp'
+        ''
+        'echo "[OK] Node.js 卸载完成"'
+    )
+
     try {
-        $removeScript = @"
-#!/bin/bash
-set -e
-
-echo "卸载 Node.js..."
-sudo apt-get purge -y nodejs 2>/dev/null || true
-sudo apt-get autoremove -y 2>/dev/null || true
-
-# 移除 NodeSource 源
-sudo rm -f /etc/apt/sources.list.d/nodesource.list
-sudo rm -f /etc/apt/keyrings/nodesource.gpg
-
-# 清理残留
-sudo rm -rf /usr/local/lib/node_modules
-sudo rm -rf /usr/local/include/node
-rm -rf ~/.npm
-rm -rf ~/.node-gyp
-
-echo "[OK] Node.js 卸载完成"
-"@
-        $removeScript | wsl bash 2>&1 | ForEach-Object {
-            if ($_ -match "^\[OK\]") { Write-OK ($_ -replace "^\[OK\] ", "") }
-            else { Write-Info "  $_" }
-        }
-
+        Invoke-WslScript -Lines $scriptLines -Description "Remove Node.js"
         $script:RemovedComponents += "Node.js"
-        Write-OK "Node.js 卸载完成 ✓"
+        Write-OK "Node.js 卸载完成"
     } catch {
         Write-Err "Node.js 卸载失败: $_"
     }
@@ -574,7 +566,7 @@ function Remove-WSLDistro {
     }
 
     Write-Step "正在卸载 WSL Ubuntu 发行版..."
-    Write-Warn "此操作将删除 WSL Ubuntu 中的所有数据！"
+    Write-Warn "此操作将删除 WSL Ubuntu 中的所有数据!"
 
     if (-not $Unattended) {
         $confirm = Confirm-Action "确认删除 WSL Ubuntu 发行版?"
@@ -585,7 +577,6 @@ function Remove-WSLDistro {
     }
 
     try {
-        # 列出并卸载 Ubuntu 发行版
         $distros = wsl --list --quiet 2>&1
         foreach ($distro in $distros -split "`n") {
             $name = $distro.Trim()
@@ -597,7 +588,7 @@ function Remove-WSLDistro {
         }
 
         $script:RemovedComponents += "WSL Ubuntu"
-        Write-OK "WSL 发行版卸载完成 ✓"
+        Write-OK "WSL 发行版卸载完成"
     } catch {
         Write-Err "WSL 卸载失败: $_"
     }
@@ -607,7 +598,6 @@ function Remove-WSLDistro {
 function Remove-SystemResiduals {
     Write-Step "正在清理系统残留..."
 
-    # 清理 Windows 端的临时文件
     try {
         $tempFiles = Get-ChildItem "$env:TEMP" -Filter "llclaw-*" -ErrorAction SilentlyContinue
         if ($tempFiles) {
@@ -615,7 +605,6 @@ function Remove-SystemResiduals {
             Write-OK "临时文件已清理"
         }
 
-        # 清理注册表中可能的残留（仅限 LLclaw 创建的）
         $regPaths = @(
             "HKCU:\Software\LLclaw",
             "HKLM:\Software\LLclaw"
@@ -627,7 +616,6 @@ function Remove-SystemResiduals {
             }
         }
 
-        # 清理桌面快捷方式
         $shortcuts = @(
             "$env:USERPROFILE\Desktop\LLclaw.lnk",
             "$env:USERPROFILE\Desktop\OpenClaw.lnk",
@@ -640,7 +628,7 @@ function Remove-SystemResiduals {
             }
         }
 
-        Write-OK "系统残留清理完成 ✓"
+        Write-OK "系统残留清理完成"
     } catch {
         Write-Warn "部分残留清理跳过: $_"
     }
@@ -653,46 +641,39 @@ function Show-UninstallReport {
     $seconds = $elapsed.Seconds
 
     Write-Host ""
-    Write-Host "  ╔═══════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "  ║                                                       ║" -ForegroundColor Green
-    Write-Host "  ║           LLclaw 卸载完成！                          ║" -ForegroundColor Green
-    Write-Host "  ║                                                       ║" -ForegroundColor Green
-    Write-Host "  ╚═══════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "  =========================================================" -ForegroundColor Green
+    Write-Host "              LLclaw 卸载完成!                               " -ForegroundColor Green
+    Write-Host "  =========================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  卸载耗时: ${minutes}分${seconds}秒" -ForegroundColor Gray
     Write-Host "  卸载日志: $script:LogFile" -ForegroundColor Gray
     Write-Host ""
 
     if ($script:RemovedComponents.Count -gt 0) {
-        Write-Host "  ┌─ 已卸载的组件 ───────────────────────────────────────┐" -ForegroundColor Green
+        Write-Host "  --- 已卸载的组件 ---" -ForegroundColor Green
         foreach ($comp in $script:RemovedComponents) {
-            Write-Host "  │  ✓ $comp" -ForegroundColor Green
-            $padding = 53 - $comp.Length - 4
-            if ($padding -gt 0) { Write-Host "$(' ' * $padding)│" -ForegroundColor Green -NoNewline; Write-Host "" }
+            Write-Host "    [x] $comp" -ForegroundColor Green
         }
-        Write-Host "  └───────────────────────────────────────────────────────┘" -ForegroundColor Green
+        Write-Host ""
     }
 
     if ($script:SkippedComponents.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  ┌─ 已保留的组件 ───────────────────────────────────────┐" -ForegroundColor Yellow
+        Write-Host "  --- 已保留的组件 ---" -ForegroundColor Yellow
         foreach ($comp in $script:SkippedComponents) {
-            Write-Host "  │  ○ $comp" -ForegroundColor Yellow
+            Write-Host "    [ ] $comp" -ForegroundColor Yellow
         }
-        Write-Host "  └───────────────────────────────────────────────────────┘" -ForegroundColor Yellow
+        Write-Host ""
     }
 
     if ($script:Errors.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  ┌─ 错误信息 ───────────────────────────────────────────┐" -ForegroundColor Red
+        Write-Host "  --- 错误信息 ---" -ForegroundColor Red
         foreach ($err in $script:Errors) {
-            Write-Host "  │  ✗ $err" -ForegroundColor Red
+            Write-Host "    [!] $err" -ForegroundColor Red
         }
-        Write-Host "  └───────────────────────────────────────────────────────┘" -ForegroundColor Red
+        Write-Host ""
     }
 
-    Write-Host ""
-    Write-Host "  如需重新安装，请运行:" -ForegroundColor Cyan
+    Write-Host "  如需重新安装, 请运行:" -ForegroundColor Cyan
     Write-Host "  irm https://raw.githubusercontent.com/rocketeee/LLclaw/main/scripts/install.ps1 | iex" -ForegroundColor Gray
     Write-Host ""
 
@@ -709,13 +690,13 @@ function Show-InteractiveMenu {
     Write-Host "  请选择卸载模式:" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  [1] 仅卸载 OpenClaw" -ForegroundColor White
-    Write-Host "      移除 OpenClaw 及其配置，保留 Node.js 和 WSL2" -ForegroundColor DarkGray
+    Write-Host "      移除 OpenClaw 及其配置, 保留 Node.js 和 WSL2" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [2] 卸载 OpenClaw + Node.js" -ForegroundColor White
-    Write-Host "      移除 OpenClaw 和 Node.js，保留 WSL2" -ForegroundColor DarkGray
+    Write-Host "      移除 OpenClaw 和 Node.js, 保留 WSL2" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [3] 完全卸载" -ForegroundColor White
-    Write-Host "      移除所有组件：OpenClaw + Node.js + WSL + Ollama" -ForegroundColor DarkGray
+    Write-Host "      移除所有组件: OpenClaw + Node.js + WSL + Ollama" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [4] 自定义选择" -ForegroundColor White
     Write-Host "      逐项确认要卸载的组件" -ForegroundColor DarkGray
@@ -730,7 +711,6 @@ function Show-InteractiveMenu {
 # ===== 主流程 =====
 Show-Banner
 
-# 管理员权限检查
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Write-Err "需要管理员权限运行此脚本"
@@ -738,10 +718,8 @@ if (-not $isAdmin) {
     exit 1
 }
 
-# 检测已安装组件
 $components = Get-InstalledComponents
 
-# 检查是否有东西可卸载
 $hasAnything = $components.Values | Where-Object { $_ -eq $true }
 if (-not $hasAnything) {
     Write-Warn "未检测到任何 OpenClaw 相关组件"
@@ -749,12 +727,9 @@ if (-not $hasAnything) {
     exit 0
 }
 
-# 导出配置（如果指定了路径）
 Export-ConfigBeforeUninstall
 
-# 确定卸载范围
 if ($Full) {
-    # 完全卸载模式
     Write-Step "完全卸载模式"
     if (-not $Unattended) {
         $confirm = Confirm-Action "确认完全卸载所有 OpenClaw 相关组件?"
@@ -774,7 +749,6 @@ if ($Full) {
     Remove-SystemResiduals
 
 } elseif ($Unattended) {
-    # 无人值守模式：仅卸载 OpenClaw
     Stop-OpenClawServices
     Remove-OpenClaw
     Remove-ConfigFiles -Keep $KeepConfig
@@ -783,7 +757,6 @@ if ($Full) {
     Remove-SystemResiduals
 
 } else {
-    # 交互式模式
     $choice = Show-InteractiveMenu
 
     switch ($choice) {
