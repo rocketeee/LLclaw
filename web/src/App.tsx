@@ -4,13 +4,14 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import DashboardLayout from "./components/DashboardLayout";
 import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import ModelConfig from "./pages/ModelConfig";
 import InstallGuide from "./pages/InstallGuide";
 import Monitoring from "./pages/Monitoring";
 import PortableConfig from "./pages/PortableConfig";
+import AgentOrchestration from "./pages/AgentOrchestration";
+import AgentMonitor from "./pages/AgentMonitor";
 
 function Router() {
   return (
@@ -21,6 +22,8 @@ function Router() {
       <Route path="/install" component={InstallGuide} />
       <Route path="/monitoring" component={Monitoring} />
       <Route path="/portable" component={PortableConfig} />
+      <Route path="/agents" component={AgentOrchestration} />
+      <Route path="/agent-monitor" component={AgentMonitor} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

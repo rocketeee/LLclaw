@@ -17,12 +17,16 @@ import {
   ChevronRight,
   Terminal,
   Cog,
+  Users,
+  Network,
 } from "lucide-react";
 import { useState } from "react";
 
 const navItems = [
   { path: "/dashboard", label: "控制台", icon: LayoutDashboard },
   { path: "/models", label: "模型配置", icon: Cpu },
+  { path: "/agents", label: "智能体编排", icon: Users },
+  { path: "/agent-monitor", label: "协同监控", icon: Network },
   { path: "/monitoring", label: "系统监控", icon: Activity },
   { path: "/install", label: "安装部署", icon: Download },
   { path: "/portable", label: "配置迁移", icon: FolderSync },
@@ -99,7 +103,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {!collapsed && (
           <div className="px-4 pb-3">
             <div className="text-[10px] font-mono text-muted-foreground/50 tracking-wider">
-              LLclaw v1.0.0
+              LLclaw v1.2.0
             </div>
           </div>
         )}

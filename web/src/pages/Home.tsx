@@ -17,6 +17,8 @@ import {
   Globe,
   Server,
   ChevronRight,
+  Users,
+  Network,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -52,6 +54,12 @@ const features = [
     link: "/portable",
   },
   {
+    icon: Users,
+    title: "多智能体协同",
+    desc: "7 大场景模板、智能分工、多 Agent 编排引擎，实现复杂任务自动化协作",
+    link: "/agents",
+  },
+  {
     icon: Shield,
     title: "安全可靠",
     desc: "DM 配对认证、沙箱隔离、API Key 加密存储，企业级安全保障",
@@ -78,7 +86,7 @@ export default function Home() {
               <Terminal className="w-4 h-4 text-primary" />
             </div>
             <span className="font-bold tracking-wider text-primary text-lg">LLclaw</span>
-            <span className="text-[10px] font-mono text-muted-foreground ml-1 mt-1">v1.0.0</span>
+            <span className="text-[10px] font-mono text-muted-foreground ml-1 mt-1">v1.2.0</span>
           </div>
           <div className="flex items-center gap-6">
             <Link href="/dashboard">
@@ -86,6 +94,9 @@ export default function Home() {
             </Link>
             <Link href="/models">
               <span className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer">模型配置</span>
+            </Link>
+            <Link href="/agents">
+              <span className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer">智能体编排</span>
             </Link>
             <Link href="/install">
               <span className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer">安装部署</span>
