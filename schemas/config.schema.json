@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LLclaw OpenClaw Configuration",
+  "description": "Configuration schema for LLclaw OpenClaw deployment tool",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Configuration version"
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Default model in format: provider/model-name",
+          "examples": ["deepseek/deepseek-chat", "qwen/qwen-max", "ollama/llama3.1"]
+        },
+        "thinkingLevel": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "Agent thinking depth level"
+        }
+      },
+      "required": ["model"]
+    },
+    "gateway": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 18789
+        },
+        "bind": {
+          "type": "string",
+          "default": "127.0.0.1"
+        },
+        "verbose": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "baseUrl": { "type": "string", "format": "uri" },
+          "apiKey": { "type": "string" },
+          "model": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "required": ["baseUrl", "model"]
+      }
+    },
+    "channels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" }
+        }
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "security": {
+      "type": "object",
+      "properties": {
+        "dmPolicy": {
+          "type": "string",
+          "enum": ["pairing", "open", "whitelist"]
+        },
+        "sandboxMode": {
+          "type": "string",
+          "enum": ["non-main", "main", "disabled"]
+        }
+      }
+    }
+  }
+}

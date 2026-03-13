@@ -1,0 +1,139 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rocketeee/LLclaw/main/schemas/config.schema.json",
+  "version": "1.0.0",
+  "agent": {
+    "model": "deepseek/deepseek-chat",
+    "thinkingLevel": "medium"
+  },
+  "gateway": {
+    "port": 18789,
+    "bind": "127.0.0.1",
+    "verbose": true
+  },
+  "models": {
+    "deepseek": {
+      "baseUrl": "https://api.deepseek.com/v1",
+      "apiKey": "YOUR_DEEPSEEK_API_KEY",
+      "model": "deepseek-chat",
+      "description": "DeepSeek 深度求索 - 高性价比推理模型"
+    },
+    "qwen": {
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "YOUR_QWEN_API_KEY",
+      "model": "qwen-max",
+      "description": "通义千问 - 阿里云百炼平台 (OpenAI 兼容)"
+    },
+    "ernie": {
+      "baseUrl": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop",
+      "apiKey": "YOUR_ERNIE_API_KEY",
+      "model": "ernie-4.0",
+      "description": "文心一言 - 百度文心大模型"
+    },
+    "zhipu": {
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "apiKey": "YOUR_ZHIPU_API_KEY",
+      "model": "glm-4-plus",
+      "description": "智谱 GLM - OpenAI 兼容接口"
+    },
+    "moonshot": {
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "apiKey": "YOUR_MOONSHOT_API_KEY",
+      "model": "moonshot-v1-128k",
+      "description": "Moonshot Kimi - 超长上下文"
+    },
+    "baichuan": {
+      "baseUrl": "https://api.baichuan-ai.com/v1",
+      "apiKey": "YOUR_BAICHUAN_API_KEY",
+      "model": "Baichuan4",
+      "description": "百川智能 - OpenAI 兼容接口"
+    },
+    "hunyuan": {
+      "baseUrl": "https://api.hunyuan.cloud.tencent.com/v1",
+      "apiKey": "YOUR_HUNYUAN_API_KEY",
+      "model": "hunyuan-pro",
+      "description": "腾讯混元 - OpenAI 兼容接口"
+    },
+    "spark": {
+      "baseUrl": "https://spark-api-open.xf-yun.com/v1",
+      "apiKey": "YOUR_SPARK_API_KEY",
+      "model": "spark-max",
+      "description": "讯飞星火 - 科大讯飞认知大模型"
+    },
+    "doubao": {
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "apiKey": "YOUR_DOUBAO_API_KEY",
+      "model": "doubao-pro-256k",
+      "description": "豆包 - 字节跳动火山引擎方舟平台"
+    },
+    "minimax": {
+      "baseUrl": "https://api.minimax.chat/v1",
+      "apiKey": "YOUR_MINIMAX_API_KEY",
+      "model": "abab6.5s-chat",
+      "description": "MiniMax - OpenAI 兼容接口"
+    },
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "model": "gpt-4o",
+      "description": "OpenAI GPT 系列"
+    },
+    "anthropic": {
+      "baseUrl": "https://api.anthropic.com/v1",
+      "apiKey": "YOUR_ANTHROPIC_API_KEY",
+      "model": "claude-sonnet-4-20250514",
+      "description": "Anthropic Claude 系列"
+    },
+    "gemini": {
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "apiKey": "YOUR_GEMINI_API_KEY",
+      "model": "gemini-2.0-flash",
+      "description": "Google Gemini 系列"
+    },
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKey": "local",
+      "model": "qwen2.5",
+      "description": "Ollama 本地模型引擎"
+    },
+    "vllm": {
+      "baseUrl": "http://localhost:8000/v1",
+      "apiKey": "local",
+      "model": "your-model-path",
+      "description": "vLLM 高性能推理引擎"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "botToken": "YOUR_TELEGRAM_BOT_TOKEN"
+    },
+    "wechat": {
+      "enabled": false
+    },
+    "webchat": {
+      "enabled": true
+    },
+    "discord": {
+      "enabled": false,
+      "botToken": "YOUR_DISCORD_BOT_TOKEN"
+    },
+    "slack": {
+      "enabled": false,
+      "botToken": "YOUR_SLACK_BOT_TOKEN"
+    },
+    "feishu": {
+      "enabled": false,
+      "appId": "YOUR_FEISHU_APP_ID",
+      "appSecret": "YOUR_FEISHU_APP_SECRET"
+    }
+  },
+  "skills": [
+    "web-search",
+    "code-interpreter",
+    "file-manager"
+  ],
+  "security": {
+    "dmPolicy": "pairing",
+    "sandboxMode": "non-main"
+  }
+}
