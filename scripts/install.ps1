@@ -335,7 +335,21 @@ function Install-OpenClaw {
         $registryFlag = "--registry https://registry.npmmirror.com"
     }
 
-    $configJson = @(
+    $scriptLines = @(
+        '#!/bin/bash'
+        'set -e'
+        ''
+        'echo "[LLclaw] Installing OpenClaw..."'
+        'npm install -g openclaw@' + $OpenClawVersion + ' ' + $registryFlag + ' 2>&1'
+        ''
+        'echo "[OK] OpenClaw installed"'
+        ''
+        'mkdir -p ~/.openclaw'
+        'mkdir -p ~/.openclaw/backups'
+        'mkdir -p ~/.openclaw/logs'
+        ''
+        'if [ ! -f ~/.openclaw/openclaw.json ]; then'
+        'cat > ~/.openclaw/openclaw.json << LLCLAW_EOF'
         '{'
         '  "version": "1.3.0",'
         '  "agent": {'
@@ -366,23 +380,7 @@ function Install-OpenClaw {
         '    "sandboxMode": "non-main"'
         '  }'
         '}'
-    ) -join '\n'
-
-    $scriptLines = @(
-        '#!/bin/bash'
-        'set -e'
-        ''
-        'echo "[LLclaw] Installing OpenClaw..."'
-        'npm install -g openclaw@' + $OpenClawVersion + ' ' + $registryFlag + ' 2>&1'
-        ''
-        'echo "[OK] OpenClaw installed"'
-        ''
-        'mkdir -p ~/.openclaw'
-        'mkdir -p ~/.openclaw/backups'
-        'mkdir -p ~/.openclaw/logs'
-        ''
-        'if [ ! -f ~/.openclaw/openclaw.json ]; then'
-        '    printf '"'"'' + $configJson + ''"'"' > ~/.openclaw/openclaw.json'
+        'LLCLAW_EOF'
         '    echo "[OK] Default config generated: ~/.openclaw/openclaw.json"'
         'fi'
         ''
