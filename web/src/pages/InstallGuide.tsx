@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import {
   Download, Copy, Check, Terminal, ChevronDown, ChevronUp,
-  Monitor, Server, Container, FileCode, ExternalLink,
+  Monitor, Server, Container, FileCode, ExternalLink, Trash2, AlertTriangle, Shield,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -494,6 +494,77 @@ export default function InstallGuide() {
               <CodeBlock code={fullScript} lang="PowerShell" />
             </div>
           )}
+        </div>
+
+        {/* Uninstall Section */}
+        <div className="panel border-destructive/30">
+          <div className="panel-header">
+            <Trash2 className="w-4 h-4 text-destructive" />
+            <span className="text-sm font-medium">一键卸载</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-mono ml-2">Uninstall</span>
+          </div>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-muted-foreground">安全卸载 OpenClaw 及其相关组件，支持选择性卸载和配置备份。</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[
+                { icon: Shield, title: "交互式卸载", desc: "逐项确认要卸载的组件", cmd: ".\\uninstall.ps1" },
+                { icon: Trash2, title: "仅卸载 OpenClaw", desc: "保留 Node.js 和 WSL2 环境", cmd: ".\\uninstall.ps1 -KeepWSL -KeepNodeJS" },
+                { icon: AlertTriangle, title: "完全卸载", desc: "移除所有组件和配置", cmd: ".\\uninstall.ps1 -Full -Unattended" },
+                { icon: Download, title: "卸载前备份", desc: "导出配置后再卸载", cmd: '.\\uninstall.ps1 -ExportConfig "C:\\backup\\config.json"' },
+              ].map((item) => {
+                const ItemIcon = item.icon;
+                return (
+                  <div key={item.title} className="p-3 rounded-lg border border-border/50 bg-card/30 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <ItemIcon className="w-3.5 h-3.5 text-destructive" />
+                      <span className="text-xs font-medium">{item.title}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">{item.desc}</p>
+                    <code className="block text-[11px] font-mono text-destructive/80 bg-destructive/5 px-2 py-1 rounded">{item.cmd}</code>
+                  </div>
+                );
+              })}
+            </div>
+
+            <CodeBlock
+              code={`# 下载卸载脚本\nirm https://raw.githubusercontent.com/rocketeee/LLclaw/main/scripts/uninstall.ps1 -OutFile uninstall.ps1\n\n# 交互式卸载（推荐）\n.\\uninstall.ps1\n\n# 完全卸载（无人值守）\n.\\uninstall.ps1 -Full -Unattended\n\n# 卸载前导出配置\n.\\uninstall.ps1 -ExportConfig "C:\\backup\\openclaw-config.json"\n\n# 仅卸载 OpenClaw，保留环境\n.\\uninstall.ps1 -KeepWSL -KeepNodeJS\n\n# 同时卸载 Ollama\n.\\uninstall.ps1 -RemoveOllama`}
+              title="卸载命令参考"
+              lang="PowerShell"
+            />
+
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => {
+                  const uninstallScript = `#Requires -RunAsAdministrator\n# LLclaw 一键卸载脚本\n# 下载完整版本: https://github.com/rocketeee/LLclaw/blob/main/scripts/uninstall.ps1\nirm https://raw.githubusercontent.com/rocketeee/LLclaw/main/scripts/uninstall.ps1 -OutFile uninstall.ps1\n.\\uninstall.ps1`;
+                  const blob = new Blob([uninstallScript], { type: "text/plain" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "llclaw-uninstall.ps1";
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  toast.success("卸载脚本已下载");
+                }}
+              >
+                <Trash2 className="w-3.5 h-3.5" />下载卸载脚本
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                onClick={() => {
+                  navigator.clipboard.writeText(".\\uninstall.ps1");
+                  toast.success("已复制卸载命令");
+                }}
+              >
+                <Copy className="w-3.5 h-3.5" />复制命令
+              </Button>
+            </div>
+          </div>
         </div>
 
         {/* System Requirements */}

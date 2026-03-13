@@ -57,6 +57,19 @@ irm https://raw.githubusercontent.com/rocketeee/LLclaw/main/scripts/install.ps1 
 | 配置导入 | 支持从文件导入已有配置 |
 | 无人值守 | 支持 `-Unattended` 参数跳过所有交互 |
 
+### 一键卸载脚本
+
+| 功能 | 说明 |
+|------|------|
+| 交互式卸载 | 4 种卸载模式菜单，逐项确认 |
+| 选择性卸载 | 可单独保留 WSL2、Node.js、配置文件 |
+| 完全卸载 | 一键清除所有组件（OpenClaw + Node.js + WSL + Ollama） |
+| 卸载前备份 | 自动导出配置到指定路径 |
+| Ollama 清理 | 可选移除 Ollama 及全部模型数据 |
+| Docker 清理 | 移除相关容器、镜像和数据卷 |
+| 系统残留清理 | 清理临时文件、注册表项、快捷方式 |
+| 卸载报告 | 完整的卸载结果汇总和日志 |
+
 ### 可视化监控面板
 
 - **控制台总览**：Gateway 运行状态、会话统计、Token 消耗、通道状态
@@ -71,6 +84,37 @@ irm https://raw.githubusercontent.com/rocketeee/LLclaw/main/scripts/install.ps1 
 - 可选是否包含敏感密钥
 - 自动备份管理，支持定时备份
 - 跨机器迁移只需导出 → 传输 → 导入三步
+
+### 一键卸载
+
+```powershell
+# 下载卸载脚本
+irm https://raw.githubusercontent.com/rocketeee/LLclaw/main/scripts/uninstall.ps1 -OutFile uninstall.ps1
+
+# 交互式卸载（推荐）
+.\uninstall.ps1
+
+# 仅卸载 OpenClaw，保留环境
+.\uninstall.ps1 -KeepWSL -KeepNodeJS
+
+# 完全卸载（无人值守）
+.\uninstall.ps1 -Full -Unattended
+
+# 卸载前导出配置
+.\uninstall.ps1 -ExportConfig "C:\backup\openclaw-config.json"
+
+# 同时卸载 Ollama 和 Docker 容器
+.\uninstall.ps1 -RemoveOllama -RemoveDocker
+```
+
+卸载脚本提供 4 种模式：
+
+| 模式 | 说明 |
+|------|------|
+| 仅卸载 OpenClaw | 移除 OpenClaw 及配置，保留 Node.js 和 WSL2 |
+| 卸载 OpenClaw + Node.js | 移除 OpenClaw 和 Node.js，保留 WSL2 |
+| 完全卸载 | 移除所有组件：OpenClaw + Node.js + WSL + Ollama |
+| 自定义选择 | 逐项确认要卸载的组件 |
 
 ---
 
