@@ -23,7 +23,7 @@
 .PARAMETER ConfigFile
     指定配置文件路径（用于迁移导入）
 .NOTES
-    版本: 1.0.0
+    版本: 1.2.0
     项目: https://github.com/rocketeee/LLclaw
     要求: Windows 11 22H2+, PowerShell 5.1+
 .EXAMPLE
@@ -50,6 +50,14 @@ $ProgressPreference = "SilentlyContinue"
 $script:StartTime = Get-Date
 $script:LogFile = "$env:TEMP\llclaw-install-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 
+# ===== 修复编码：强制 UTF-8 输出 =====
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:WSL_UTF8 = "1"
+$OutputEncoding = [System.Text.Encoding]::UTF8
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $PSDefaultParameterValues['*:Encoding'] = 'utf8'
+}
+
 # ===== 颜色输出函数 =====
 function Write-Step  { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [LLclaw] " -ForegroundColor Cyan -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [STEP] $msg" }
 function Write-OK    { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [  OK  ] " -ForegroundColor Green -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [OK] $msg" }
@@ -57,14 +65,50 @@ function Write-Warn  { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host
 function Write-Err   { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [ERROR ] " -ForegroundColor Red -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [ERROR] $msg" }
 function Write-Info  { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [ INFO ] " -ForegroundColor DarkGray -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [INFO] $msg" }
 
+# ===== 安全执行 WSL bash 脚本（通过临时文件避免编码问题）=====
+function Invoke-WslScript {
+    param(
+        [string]$Script,
+        [string]$Description = "WSL script"
+    )
+
+    # 创建临时文件，使用 UTF-8 无 BOM 编码
+    $tempFile = [System.IO.Path]::GetTempFileName() + ".sh"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($tempFile, $Script.Replace("`r`n", "`n"), $utf8NoBom)
+
+    # 将 Windows 路径转为 WSL 路径
+    $winPath = $tempFile.Replace('\', '\\')
+    $wslTempPath = "/tmp/llclaw_$(Get-Random).sh"
+
+    try {
+        # 复制脚本到 WSL 并执行
+        wsl -- bash -c "cp '$(wsl wslpath -u $tempFile)' '$wslTempPath' && chmod +x '$wslTempPath' && bash '$wslTempPath' 2>&1; EXIT_CODE=`$?; rm -f '$wslTempPath'; exit `$EXIT_CODE" 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            if ($line -match "^\[OK\]") { Write-OK ($line -replace "^\[OK\]\s*", "") }
+            elseif ($line -match "^\[FAIL\]") { Write-Err ($line -replace "^\[FAIL\]\s*", "") }
+            elseif ($line -match "^\[WARN\]") { Write-Warn ($line -replace "^\[WARN\]\s*", "") }
+            elseif ($line -match "^\[LLclaw\]") { Write-Step ($line -replace "^\[LLclaw\]\s*", "") }
+            else { Write-Info "  $line" }
+        }
+        return $LASTEXITCODE
+    } catch {
+        Write-Err "WSL 执行失败: $_"
+        return 1
+    } finally {
+        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ===== Banner =====
 function Show-Banner {
     Write-Host ""
     Write-Host "  ╔═══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
     Write-Host "  ║                                                       ║" -ForegroundColor Cyan
-    Write-Host "  ║   LLclaw - OpenClaw Windows 11 一键部署工具 v1.0.0   ║" -ForegroundColor Cyan
+    Write-Host "  ║   LLclaw - OpenClaw Windows 11 一键部署工具 v1.2.0   ║" -ForegroundColor Cyan
     Write-Host "  ║                                                       ║" -ForegroundColor Cyan
     Write-Host "  ║   支持 15+ 国内外大模型 | Ollama/vLLM 私有化部署     ║" -ForegroundColor Cyan
+    Write-Host "  ║   多智能体协同 | 实时监控 | 可移植配置               ║" -ForegroundColor Cyan
     Write-Host "  ║   GitHub: github.com/rocketeee/LLclaw                ║" -ForegroundColor Cyan
     Write-Host "  ║                                                       ║" -ForegroundColor Cyan
     Write-Host "  ╚═══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
@@ -83,14 +127,14 @@ function Test-SystemRequirements {
         Write-Err "请升级到 Windows 11 后重试"
         exit 1
     }
-    Write-OK "Windows 11 Build $build ✓"
+    Write-OK "Windows 11 Build $build"
 
     # 架构检查
     if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
         Write-Err "需要 64 位 (x64) 系统，当前: $($env:PROCESSOR_ARCHITECTURE)"
         exit 1
     }
-    Write-OK "系统架构: x64 ✓"
+    Write-OK "系统架构: x64"
 
     # 管理员权限检查
     $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -99,14 +143,14 @@ function Test-SystemRequirements {
         Write-Err "请右键 PowerShell 选择「以管理员身份运行」"
         exit 1
     }
-    Write-OK "管理员权限 ✓"
+    Write-OK "管理员权限"
 
     # 内存检查
     $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
     if ($ram -lt 4) {
         Write-Warn "内存不足 4GB (当前 $ram GB)，可能影响性能"
     } else {
-        Write-OK "物理内存: $ram GB ✓"
+        Write-OK "物理内存: $ram GB"
     }
 
     # 磁盘空间检查
@@ -119,14 +163,14 @@ function Test-SystemRequirements {
             if ($continue -ne "y") { exit 0 }
         }
     } else {
-        Write-OK "磁盘空间: $freeGB GB 可用 ✓"
+        Write-OK "磁盘空间: $freeGB GB 可用"
     }
 
     # 虚拟化检查
     try {
         $hyperv = Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty HypervisorPresent
         if ($hyperv) {
-            Write-OK "虚拟化: 已启用 ✓"
+            Write-OK "虚拟化: 已启用"
         } else {
             Write-Warn "虚拟化可能未启用，WSL2 需要硬件虚拟化支持"
             Write-Info "请在 BIOS 中启用 Intel VT-x 或 AMD-V"
@@ -138,11 +182,11 @@ function Test-SystemRequirements {
     # 网络检查
     try {
         $null = Invoke-WebRequest -Uri "https://www.baidu.com" -TimeoutSec 5 -UseBasicParsing
-        Write-OK "网络连接: 正常 ✓"
+        Write-OK "网络连接: 正常"
     } catch {
         try {
             $null = Invoke-WebRequest -Uri "https://www.google.com" -TimeoutSec 5 -UseBasicParsing
-            Write-OK "网络连接: 正常 (国际) ✓"
+            Write-OK "网络连接: 正常 (国际)"
         } catch {
             Write-Err "无法连接互联网，请检查网络设置"
             exit 1
@@ -202,7 +246,10 @@ function Install-WSL2 {
         $wslList = wsl --list --quiet 2>&1
         if ($LASTEXITCODE -eq 0 -and $wslList) {
             Write-OK "WSL2 已安装，检测到发行版:"
-            wsl --list --verbose 2>&1 | ForEach-Object { Write-Info "  $_" }
+            wsl --list --verbose 2>&1 | ForEach-Object {
+                $line = $_.ToString().Trim()
+                if ($line) { Write-Info "  $line" }
+            }
             return
         }
     } catch {}
@@ -220,11 +267,14 @@ function Install-WSL2 {
     }
 
     # 安装 WSL
-    wsl --install -d Ubuntu-24.04 --no-launch 2>&1 | ForEach-Object { Write-Info "  $_" }
+    wsl --install -d Ubuntu-24.04 --no-launch 2>&1 | ForEach-Object {
+        $line = $_.ToString().Trim()
+        if ($line) { Write-Info "  $line" }
+    }
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn "WSL 安装可能需要重启计算机"
-        Write-Info "重启后请重新运行此脚本"
+        Write-Warn "WSL 安装可能需要重启计算机后才能完成"
+        Write-Info "重启后请重新运行此脚本（加 -SkipWSL 参数跳过 WSL 安装步骤）"
         
         if (-not $Unattended) {
             $restart = Read-Host "是否立即重启? (y/N)"
@@ -236,7 +286,7 @@ function Install-WSL2 {
         exit 0
     }
 
-    Write-OK "WSL2 + Ubuntu 24.04 安装完成 ✓"
+    Write-OK "WSL2 + Ubuntu 24.04 安装完成"
 }
 
 # ===== Node.js 安装 =====
@@ -244,52 +294,54 @@ function Install-NodeJS {
     Write-Step "正在在 WSL 中安装 Node.js $NodeVersion..."
 
     $mirror = Get-BestMirror
-    $nodeSourceMirror = ""
+    $npmRegistry = ""
     if ($mirror -eq "taobao") {
-        $nodeSourceMirror = "https://npmmirror.com/mirrors/node/"
+        $npmRegistry = "https://registry.npmmirror.com"
     }
 
-    $installScript = @"
+    $bashScript = @"
 #!/bin/bash
 set -e
 
-# 检查是否已安装正确版本
+# Check if already installed
 if command -v node &>/dev/null; then
     CURRENT=`$(node --version | cut -d'.' -f1 | tr -d 'v')
     if [ "`$CURRENT" -ge "$NodeVersion" ]; then
-        echo "[OK] Node.js `$(node --version) 已安装"
+        echo "[OK] Node.js `$(node --version) already installed"
         echo "[OK] npm `$(npm --version)"
         exit 0
     fi
 fi
 
-echo "[LLclaw] 安装 Node.js $NodeVersion..."
+echo "[LLclaw] Installing Node.js $NodeVersion..."
 
-# 更新包管理器
+# Update package manager
 sudo apt-get update -qq
 
-# 使用 NodeSource 安装
+# Install via NodeSource
 curl -fsSL https://deb.nodesource.com/setup_${NodeVersion}.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# 配置 npm 镜像
-if [ "$mirror" = "taobao" ]; then
-    npm config set registry https://registry.npmmirror.com
-    echo "[OK] npm 镜像已设置为淘宝源"
+# Configure npm mirror
+if [ -n "$npmRegistry" ]; then
+    npm config set registry $npmRegistry
+    echo "[OK] npm registry set to mirror"
 fi
 
-echo "[OK] Node.js `$(node --version) 安装完成"
+echo "[OK] Node.js `$(node --version) installed"
 echo "[OK] npm `$(npm --version)"
 "@
 
-    $installScript | wsl bash 2>&1 | ForEach-Object { Write-Info "  $_" }
+    $exitCode = Invoke-WslScript -Script $bashScript -Description "Node.js installation"
 
-    if ($LASTEXITCODE -ne 0) {
+    if ($exitCode -ne 0) {
         Write-Err "Node.js 安装失败"
-        Write-Info "请尝试手动安装: wsl 后执行 curl -fsSL https://deb.nodesource.com/setup_${NodeVersion}.x | sudo -E bash -"
+        Write-Info "请尝试手动安装: 进入 WSL 后执行:"
+        Write-Info "  curl -fsSL https://deb.nodesource.com/setup_${NodeVersion}.x | sudo -E bash -"
+        Write-Info "  sudo apt-get install -y nodejs"
         exit 1
     }
-    Write-OK "Node.js $NodeVersion 安装完成 ✓"
+    Write-OK "Node.js $NodeVersion 安装完成"
 }
 
 # ===== OpenClaw 安装 =====
@@ -302,26 +354,26 @@ function Install-OpenClaw {
         $registryFlag = "--registry https://registry.npmmirror.com"
     }
 
-    $installScript = @"
+    $bashScript = @"
 #!/bin/bash
 set -e
 
-echo "[LLclaw] 安装 OpenClaw..."
+echo "[LLclaw] Installing OpenClaw..."
 npm install -g openclaw@$OpenClawVersion $registryFlag 2>&1
 
-echo "[OK] OpenClaw 安装完成"
+echo "[OK] OpenClaw installed"
 
-# 创建配置目录
+# Create config directories
 mkdir -p ~/.openclaw
 mkdir -p ~/.openclaw/backups
 mkdir -p ~/.openclaw/logs
 
-# 生成默认配置
+# Generate default config
 if [ ! -f ~/.openclaw/openclaw.json ]; then
     cat > ~/.openclaw/openclaw.json << 'CONF'
 {
   "`$schema": "https://raw.githubusercontent.com/rocketeee/LLclaw/main/schemas/config.schema.json",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "agent": {
     "model": "deepseek/deepseek-chat",
     "thinkingLevel": "medium"
@@ -338,6 +390,11 @@ if [ ! -f ~/.openclaw/openclaw.json ]; then
       "model": "deepseek-chat"
     }
   },
+  "multiAgent": {
+    "enabled": false,
+    "orchestration": "sequential",
+    "agents": []
+  },
   "channels": {},
   "skills": [],
   "security": {
@@ -346,16 +403,16 @@ if [ ! -f ~/.openclaw/openclaw.json ]; then
   }
 }
 CONF
-    echo "[OK] 默认配置已生成: ~/.openclaw/openclaw.json"
+    echo "[OK] Default config generated: ~/.openclaw/openclaw.json"
 fi
 
-echo "[LLclaw] 运行安装向导..."
-openclaw onboard --install-daemon 2>&1 || echo "[WARN] 安装向导跳过（可稍后运行 openclaw onboard）"
+echo "[LLclaw] Running setup wizard..."
+openclaw onboard --install-daemon 2>&1 || echo "[WARN] Setup wizard skipped (run 'openclaw onboard' later)"
 "@
 
-    $installScript | wsl bash 2>&1 | ForEach-Object { Write-Info "  $_" }
+    $exitCode = Invoke-WslScript -Script $bashScript -Description "OpenClaw installation"
 
-    Write-OK "OpenClaw 安装完成 ✓"
+    Write-OK "OpenClaw 安装完成"
 }
 
 # ===== Ollama 安装（可选）=====
@@ -364,35 +421,35 @@ function Install-Ollama {
 
     Write-Step "正在安装 Ollama 本地模型引擎..."
 
-    $installScript = @"
+    $bashScript = @"
 #!/bin/bash
 set -e
 
-# 检查是否已安装
+# Check if already installed
 if command -v ollama &>/dev/null; then
-    echo "[OK] Ollama 已安装: `$(ollama --version)"
+    echo "[OK] Ollama already installed: `$(ollama --version 2>&1 || echo 'installed')"
     exit 0
 fi
 
-echo "[LLclaw] 下载并安装 Ollama..."
+echo "[LLclaw] Downloading and installing Ollama..."
 curl -fsSL https://ollama.com/install.sh | sh
 
-echo "[OK] Ollama 安装完成"
+echo "[OK] Ollama installed"
 
-# 启动 Ollama 服务
-echo "[LLclaw] 启动 Ollama 服务..."
+# Start Ollama service
+echo "[LLclaw] Starting Ollama service..."
 ollama serve &>/dev/null &
 sleep 2
 
-echo "[LLclaw] 拉取推荐模型 (qwen2.5:7b)..."
-ollama pull qwen2.5:7b 2>&1 || echo "[WARN] 模型拉取失败，可稍后手动执行: ollama pull qwen2.5:7b"
+echo "[LLclaw] Pulling recommended model (qwen2.5:7b)..."
+ollama pull qwen2.5:7b 2>&1 || echo "[WARN] Model pull failed, run manually: ollama pull qwen2.5:7b"
 
-echo "[OK] Ollama 安装完成"
+echo "[OK] Ollama setup complete"
 "@
 
-    $installScript | wsl bash 2>&1 | ForEach-Object { Write-Info "  $_" }
+    Invoke-WslScript -Script $bashScript -Description "Ollama installation"
 
-    Write-OK "Ollama 安装完成 ✓"
+    Write-OK "Ollama 安装完成"
 }
 
 # ===== 配置导入 =====
@@ -410,12 +467,16 @@ function Import-Config {
         $config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
         Write-OK "配置文件解析成功"
 
-        # 将配置复制到 WSL
+        # 将配置复制到 WSL（通过临时文件方式）
         $wslPath = wsl wslpath -u (Resolve-Path $ConfigFile).Path
-        $copyScript = "cp '$wslPath' ~/.openclaw/openclaw.json && echo '[OK] 配置已导入'"
-        $copyScript | wsl bash 2>&1 | ForEach-Object { Write-Info "  $_" }
+        $copyScript = @"
+#!/bin/bash
+cp '$wslPath' ~/.openclaw/openclaw.json
+echo "[OK] Config imported to ~/.openclaw/openclaw.json"
+"@
+        Invoke-WslScript -Script $copyScript -Description "Config import"
 
-        Write-OK "配置导入完成 ✓"
+        Write-OK "配置导入完成"
     } catch {
         Write-Err "配置文件格式无效: $_"
     }
@@ -498,7 +559,7 @@ volumes:
     docker compose up -d 2>&1 | ForEach-Object { Write-Info "  $_" }
     Pop-Location
 
-    Write-OK "Docker 部署完成 ✓"
+    Write-OK "Docker 部署完成"
     Write-Info "部署目录: $deployDir"
 }
 
@@ -506,55 +567,49 @@ volumes:
 function Test-Installation {
     Write-Step "正在验证安装..."
 
-    $verifyScript = @"
+    $bashScript = @"
 #!/bin/bash
-echo "--- 安装验证 ---"
+echo "--- Installation Verification ---"
 
 # Node.js
 if command -v node &>/dev/null; then
     echo "[OK] Node.js: `$(node --version)"
 else
-    echo "[FAIL] Node.js 未安装"
+    echo "[FAIL] Node.js not installed"
 fi
 
 # npm
 if command -v npm &>/dev/null; then
     echo "[OK] npm: `$(npm --version)"
 else
-    echo "[FAIL] npm 未安装"
+    echo "[FAIL] npm not installed"
 fi
 
 # OpenClaw
 if command -v openclaw &>/dev/null; then
-    echo "[OK] OpenClaw: 已安装"
+    echo "[OK] OpenClaw: installed"
 else
-    echo "[WARN] OpenClaw: 未检测到（可能需要重新打开终端）"
+    echo "[WARN] OpenClaw: not detected (may need to reopen terminal)"
 fi
 
 # Ollama
 if command -v ollama &>/dev/null; then
-    echo "[OK] Ollama: `$(ollama --version 2>&1 || echo '已安装')"
+    echo "[OK] Ollama: `$(ollama --version 2>&1 || echo 'installed')"
 else
-    echo "[INFO] Ollama: 未安装（可选组件）"
+    echo "[INFO] Ollama: not installed (optional)"
 fi
 
-# 配置文件
+# Config file
 if [ -f ~/.openclaw/openclaw.json ]; then
-    echo "[OK] 配置文件: ~/.openclaw/openclaw.json"
+    echo "[OK] Config: ~/.openclaw/openclaw.json"
 else
-    echo "[WARN] 配置文件不存在"
+    echo "[WARN] Config file not found"
 fi
 
-echo "--- 验证完成 ---"
+echo "--- Verification Complete ---"
 "@
 
-    $verifyScript | wsl bash 2>&1 | ForEach-Object {
-        if ($_ -match "^\[OK\]") { Write-OK ($_ -replace "^\[OK\] ", "") }
-        elseif ($_ -match "^\[FAIL\]") { Write-Err ($_ -replace "^\[FAIL\] ", "") }
-        elseif ($_ -match "^\[WARN\]") { Write-Warn ($_ -replace "^\[WARN\] ", "") }
-        elseif ($_ -match "^\[INFO\]") { Write-Info ($_ -replace "^\[INFO\] ", "") }
-        else { Write-Info "  $_" }
-    }
+    Invoke-WslScript -Script $bashScript -Description "Installation verification"
 }
 
 # ===== 显示完成信息 =====
