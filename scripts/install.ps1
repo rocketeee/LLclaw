@@ -23,7 +23,7 @@
 .PARAMETER ConfigFile
     指定配置文件路径（用于迁移导入）
 .NOTES
-    版本: 1.4.0
+    版本: 1.5.0
     项目: https://github.com/rocketeee/LLclaw
     要求: Windows 11 22H2+, PowerShell 5.1+
 .EXAMPLE
@@ -51,6 +51,56 @@ $script:LogFile = "$env:TEMP\llclaw-install-$(Get-Date -Format 'yyyyMMdd-HHmmss'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $env:WSL_UTF8 = "1"
 $OutputEncoding = [System.Text.Encoding]::UTF8
+
+# ===== 进度条系统 =====
+$script:TotalSteps = 7
+$script:CurrentStep = 0
+$script:StepNames = @(
+    "系统环境检测"
+    "WSL2 检查与启动"
+    "镜像源检测"
+    "Node.js 安装"
+    "OpenClaw 安装"
+    "安装验证"
+    "完成"
+)
+
+function Show-Progress {
+    param(
+        [string]$StepName,
+        [string]$Detail = ""
+    )
+    $script:CurrentStep++
+    $pct = [math]::Floor(($script:CurrentStep / $script:TotalSteps) * 100)
+    $barWidth = 40
+    $filled = [math]::Floor($barWidth * $script:CurrentStep / $script:TotalSteps)
+    $empty = $barWidth - $filled
+    $bar = ([string][char]9608) * $filled + ([string][char]9617) * $empty
+
+    Write-Host ""
+    Write-Host "  [$bar] $pct% " -ForegroundColor Cyan -NoNewline
+    Write-Host "($script:CurrentStep/$script:TotalSteps) $StepName" -ForegroundColor White
+    if ($Detail) {
+        Write-Host "  $Detail" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    Add-Content $script:LogFile "[PROGRESS] Step $script:CurrentStep/$script:TotalSteps ($pct%) - $StepName"
+}
+
+function Show-SubProgress {
+    param(
+        [int]$Current,
+        [int]$Total,
+        [string]$Label
+    )
+    $pct = [math]::Floor(($Current / $Total) * 100)
+    $barWidth = 30
+    $filled = [math]::Floor($barWidth * $Current / $Total)
+    $empty = $barWidth - $filled
+    $bar = ([string][char]9608) * $filled + ([string][char]9617) * $empty
+    $ts = Get-Date -Format "HH:mm:ss"
+    Write-Host "`r[$ts] [ .... ] [$bar] $pct% $Label    " -ForegroundColor DarkCyan -NoNewline
+}
 
 # ===== 颜色输出函数 =====
 function Write-Step  { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host "[$ts] [LLclaw] " -ForegroundColor Cyan -NoNewline; Write-Host $msg; Add-Content $script:LogFile "[$ts] [STEP] $msg" }
@@ -84,7 +134,7 @@ function Invoke-WslScript {
             elseif ($line -match "^\[FAIL\]") { Write-Err ($line -replace "^\[FAIL\]\s*", "") }
             elseif ($line -match "^\[WARN\]") { Write-Warn ($line -replace "^\[WARN\]\s*", "") }
             elseif ($line -match "^\[LLclaw\]") { Write-Step ($line -replace "^\[LLclaw\]\s*", "") }
-            elseif ($line.Trim() -match "^\d+$") { <# 忽略纯数字行（退出码） #> }
+            elseif ($line.Trim() -match "^\d+$") { <# 忽略纯数字行 #> }
             else { Write-Info "  $line" }
         }
     } catch {
@@ -99,7 +149,7 @@ function Show-Banner {
     Write-Host ""
     Write-Host "  =========================================================" -ForegroundColor Cyan
     Write-Host "                                                             " -ForegroundColor Cyan
-    Write-Host "    LLclaw - OpenClaw Windows 11 一键部署工具 v1.4.0        " -ForegroundColor Cyan
+    Write-Host "    LLclaw - OpenClaw Windows 11 一键部署工具 v1.5.0        " -ForegroundColor Cyan
     Write-Host "                                                             " -ForegroundColor Cyan
     Write-Host "    支持 15+ 国内外大模型 | Ollama/vLLM 私有化部署          " -ForegroundColor Cyan
     Write-Host "    多智能体协同 | 实时监控 | 可移植配置                     " -ForegroundColor Cyan
@@ -111,39 +161,64 @@ function Show-Banner {
 
 # ===== 系统检测 =====
 function Test-SystemRequirements {
-    Write-Step "正在检测系统环境..."
+    Show-Progress -StepName "系统环境检测" -Detail "检查 Windows 版本、架构、权限、内存、磁盘、虚拟化、网络"
 
+    $checkItems = @("Windows 版本", "系统架构", "管理员权限", "物理内存", "磁盘空间", "虚拟化", "网络连接")
+    $checkIndex = 0
+
+    # Windows 版本
+    $checkIndex++
+    Show-SubProgress -Current $checkIndex -Total $checkItems.Count -Label "Windows 版本"
     $os = Get-CimInstance Win32_OperatingSystem
     $build = [int]$os.BuildNumber
     if ($build -lt 22000) {
+        Write-Host ""
         Write-Err "需要 Windows 11 (Build 22000+), 当前版本: Build $build"
         exit 1
     }
+    Write-Host ""
     Write-OK "Windows 11 Build $build"
 
+    # 架构
+    $checkIndex++
+    Show-SubProgress -Current $checkIndex -Total $checkItems.Count -Label "系统架构"
     if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+        Write-Host ""
         Write-Err "需要 64 位 (x64) 系统, 当前: $($env:PROCESSOR_ARCHITECTURE)"
         exit 1
     }
+    Write-Host ""
     Write-OK "系统架构: x64"
 
+    # 管理员权限
+    $checkIndex++
+    Show-SubProgress -Current $checkIndex -Total $checkItems.Count -Label "管理员权限"
     $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) {
+        Write-Host ""
         Write-Err "需要管理员权限运行此脚本"
-        Write-Err "请右键 PowerShell 选择「以管理员身份运行」"
         exit 1
     }
+    Write-Host ""
     Write-OK "管理员权限"
 
+    # 内存
+    $checkIndex++
+    Show-SubProgress -Current $checkIndex -Total $checkItems.Count -Label "物理内存"
     $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
+    Write-Host ""
     if ($ram -lt 4) {
         Write-Warn "内存不足 4GB (当前 $ram GB), 可能影响性能"
     } else {
         Write-OK "物理内存: $ram GB"
     }
 
+    # 磁盘
+    $checkIndex++
+    Show-SubProgress -Current $checkIndex -Total $checkItems.Count -Label "磁盘空间"
     $disk = Get-PSDrive C
     $freeGB = [math]::Round($disk.Free / 1GB, 1)
+    Write-Host ""
     if ($freeGB -lt 10) {
         Write-Warn "C 盘剩余空间不足 10GB (当前 $freeGB GB)"
         if (-not $Unattended) {
@@ -154,6 +229,10 @@ function Test-SystemRequirements {
         Write-OK "磁盘空间: $freeGB GB 可用"
     }
 
+    # 虚拟化
+    $checkIndex++
+    Show-SubProgress -Current $checkIndex -Total $checkItems.Count -Label "虚拟化"
+    Write-Host ""
     try {
         $hyperv = Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty HypervisorPresent
         if ($hyperv) {
@@ -166,6 +245,10 @@ function Test-SystemRequirements {
         Write-Info "无法检测虚拟化状态"
     }
 
+    # 网络
+    $checkIndex++
+    Show-SubProgress -Current $checkIndex -Total $checkItems.Count -Label "网络连接"
+    Write-Host ""
     try {
         $null = Invoke-WebRequest -Uri "https://www.baidu.com" -TimeoutSec 5 -UseBasicParsing
         Write-OK "网络连接: 正常"
@@ -197,19 +280,25 @@ function Get-BestMirror {
 
     $best = "default"
     $bestTime = 9999
+    $mirrorIndex = 0
+    $mirrorTotal = $mirrors.Count
 
     foreach ($name in $mirrors.Keys) {
+        $mirrorIndex++
+        Show-SubProgress -Current $mirrorIndex -Total $mirrorTotal -Label "测试 $name"
         try {
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $null = Invoke-WebRequest -Uri $mirrors[$name] -TimeoutSec 5 -UseBasicParsing
             $sw.Stop()
             $ms = $sw.ElapsedMilliseconds
+            Write-Host ""
             Write-Info "  $name : ${ms}ms"
             if ($ms -lt $bestTime) {
                 $bestTime = $ms
                 $best = $name
             }
         } catch {
+            Write-Host ""
             Write-Info "  $name : 超时"
         }
     }
@@ -218,8 +307,10 @@ function Get-BestMirror {
     return $best
 }
 
-# ===== WSL2 安装 =====
+# ===== WSL2 安装与启动 =====
 function Install-WSL2 {
+    Show-Progress -StepName "WSL2 检查与启动" -Detail "检测 WSL2 状态, 自动启动已停止的发行版"
+
     if ($SkipWSL) {
         Write-Step "跳过 WSL2 安装 (--SkipWSL)"
         return
@@ -227,6 +318,7 @@ function Install-WSL2 {
 
     Write-Step "正在检查 WSL2 状态..."
 
+    $wslReady = $false
     try {
         $wslList = wsl --list --quiet 2>&1
         if ($LASTEXITCODE -eq 0 -and $wslList) {
@@ -235,44 +327,94 @@ function Install-WSL2 {
                 $line = $_.ToString().Trim()
                 if ($line) { Write-Info "  $line" }
             }
-            return
+            $wslReady = $true
         }
     } catch {}
 
-    Write-Step "正在安装 WSL2 和 Ubuntu 24.04..."
-    Write-Info "这可能需要几分钟, 请耐心等待..."
+    if (-not $wslReady) {
+        Write-Step "正在安装 WSL2 和 Ubuntu 24.04..."
+        Write-Info "这可能需要几分钟, 请耐心等待..."
 
+        try {
+            dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart 2>&1 | Out-Null
+            dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart 2>&1 | Out-Null
+            Write-OK "WSL 功能已启用"
+        } catch {
+            Write-Warn "WSL 功能启用可能需要重启"
+        }
+
+        wsl --install -d Ubuntu-24.04 --no-launch 2>&1 | ForEach-Object {
+            $line = $_.ToString().Trim()
+            if ($line) { Write-Info "  $line" }
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "WSL 安装可能需要重启计算机后才能完成"
+            Write-Info "重启后请重新运行此脚本 (加 -SkipWSL 参数跳过 WSL 安装步骤)"
+            if (-not $Unattended) {
+                $restart = Read-Host "是否立即重启? (y/N)"
+                if ($restart -eq "y") {
+                    Write-Step "正在重启计算机..."
+                    Restart-Computer -Force
+                }
+            }
+            exit 0
+        }
+        Write-OK "WSL2 + Ubuntu 24.04 安装完成"
+    }
+
+    # ===== 关键修复: 自动启动已停止的 WSL 发行版 =====
+    Write-Step "正在确保 WSL 发行版已启动..."
+
+    # 检查默认发行版状态
+    $distroRunning = $false
     try {
-        dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart 2>&1 | Out-Null
-        dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart 2>&1 | Out-Null
-        Write-OK "WSL 功能已启用"
-    } catch {
-        Write-Warn "WSL 功能启用可能需要重启"
-    }
-
-    wsl --install -d Ubuntu-24.04 --no-launch 2>&1 | ForEach-Object {
-        $line = $_.ToString().Trim()
-        if ($line) { Write-Info "  $line" }
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "WSL 安装可能需要重启计算机后才能完成"
-        Write-Info "重启后请重新运行此脚本 (加 -SkipWSL 参数跳过 WSL 安装步骤)"
-        if (-not $Unattended) {
-            $restart = Read-Host "是否立即重启? (y/N)"
-            if ($restart -eq "y") {
-                Write-Step "正在重启计算机..."
-                Restart-Computer -Force
+        $statusOutput = wsl --list --verbose 2>&1
+        foreach ($statusLine in $statusOutput) {
+            $text = $statusLine.ToString().Trim()
+            if ($text -match "^\*" -and $text -match "Running") {
+                $distroRunning = $true
             }
         }
-        exit 0
+    } catch {}
+
+    if (-not $distroRunning) {
+        Write-Info "默认 WSL 发行版未运行, 正在启动..."
+        # 用一个简单命令唤醒 WSL
+        $wakeResult = wsl -- echo "WSL_READY" 2>&1
+        $wakeText = ($wakeResult | ForEach-Object { $_.ToString() }) -join ""
+        if ($wakeText -match "WSL_READY") {
+            Write-OK "WSL 发行版已成功启动"
+        } else {
+            Write-Warn "WSL 启动返回: $wakeText"
+            Write-Info "尝试继续安装..."
+        }
+    } else {
+        Write-OK "WSL 发行版已在运行中"
     }
 
-    Write-OK "WSL2 + Ubuntu 24.04 安装完成"
+    # 验证 WSL 可以正常执行命令
+    Write-Step "正在验证 WSL 环境..."
+    try {
+        $testResult = wsl -- bash -c "echo LLCLAW_WSL_OK" 2>&1
+        $testText = ($testResult | ForEach-Object { $_.ToString() }) -join ""
+        if ($testText -match "LLCLAW_WSL_OK") {
+            Write-OK "WSL 环境验证通过, 可以执行命令"
+        } else {
+            Write-Warn "WSL 环境验证异常: $testText"
+            Write-Info "尝试继续安装, 如遇问题请手动执行: wsl"
+        }
+    } catch {
+        Write-Err "无法与 WSL 通信: $_"
+        Write-Info "请手动执行 'wsl' 确认 WSL 正常后重新运行脚本"
+        exit 1
+    }
 }
 
 # ===== Node.js 安装 =====
 function Install-NodeJS {
+    Show-Progress -StepName "Node.js 安装" -Detail "在 WSL 中安装 Node.js $NodeVersion"
+
     Write-Step "正在在 WSL 中安装 Node.js $NodeVersion..."
 
     $mirror = Get-BestMirror
@@ -319,6 +461,8 @@ function Install-NodeJS {
 
 # ===== OpenClaw 安装 =====
 function Install-OpenClaw {
+    Show-Progress -StepName "OpenClaw 安装" -Detail "安装 OpenClaw $OpenClawVersion 并生成默认配置"
+
     Write-Step "正在安装 OpenClaw $OpenClawVersion..."
 
     $mirror = Get-BestMirror
@@ -343,7 +487,7 @@ function Install-OpenClaw {
         'if [ ! -f ~/.openclaw/openclaw.json ]; then'
         'cat > ~/.openclaw/openclaw.json << LLCLAW_EOF'
         '{'
-        '  "version": "1.4.0",'
+        '  "version": "1.5.0",'
         '  "agent": {'
         '    "model": "deepseek/deepseek-chat",'
         '    "thinkingLevel": "medium"'
@@ -524,40 +668,58 @@ function Install-DockerMode {
 
 # ===== 安装后验证 =====
 function Test-Installation {
-    Write-Step "正在验证安装..."
+    Show-Progress -StepName "安装验证" -Detail "验证 Node.js、npm、OpenClaw、配置文件"
+
+    Write-Step "正在验证安装结果..."
 
     $scriptLines = @(
         '#!/bin/bash'
         ''
+        'PASS=0'
+        'TOTAL=0'
+        ''
+        'TOTAL=$((TOTAL+1))'
         'if command -v node &>/dev/null; then'
         '    echo "[OK] Node.js: $(node --version)"'
+        '    PASS=$((PASS+1))'
         'else'
         '    echo "[FAIL] Node.js 未安装"'
         'fi'
         ''
+        'TOTAL=$((TOTAL+1))'
         'if command -v npm &>/dev/null; then'
         '    echo "[OK] npm: $(npm --version)"'
+        '    PASS=$((PASS+1))'
         'else'
         '    echo "[FAIL] npm 未安装"'
         'fi'
         ''
+        'TOTAL=$((TOTAL+1))'
         'if command -v openclaw &>/dev/null; then'
         '    echo "[OK] OpenClaw: 已安装"'
+        '    PASS=$((PASS+1))'
         'else'
         '    echo "[WARN] OpenClaw: 未检测到 (可能需要重新打开终端)"'
         'fi'
         ''
+        'TOTAL=$((TOTAL+1))'
         'if command -v ollama &>/dev/null; then'
         '    echo "[OK] Ollama: 已安装"'
+        '    PASS=$((PASS+1))'
         'else'
         '    echo "[INFO] Ollama: 未安装 (可选组件)"'
+        '    PASS=$((PASS+1))'
         'fi'
         ''
+        'TOTAL=$((TOTAL+1))'
         'if [ -f ~/.openclaw/openclaw.json ]; then'
         '    echo "[OK] 配置文件: ~/.openclaw/openclaw.json"'
+        '    PASS=$((PASS+1))'
         'else'
         '    echo "[WARN] 配置文件未找到"'
         'fi'
+        ''
+        'echo "[OK] 验证完成: $PASS/$TOTAL 项通过"'
     )
 
     Invoke-WslScript -Lines $scriptLines -Description "Installation verification"
@@ -565,13 +727,15 @@ function Test-Installation {
 
 # ===== 显示完成信息 =====
 function Show-Completion {
+    Show-Progress -StepName "安装完成" -Detail "所有组件已部署"
+
     $elapsed = (Get-Date) - $script:StartTime
     $minutes = [math]::Floor($elapsed.TotalMinutes)
     $seconds = $elapsed.Seconds
 
     Write-Host ""
     Write-Host "  =========================================================" -ForegroundColor Green
-    Write-Host "              LLclaw 安装完成!                               " -ForegroundColor Green
+    Write-Host "           LLclaw 安装完成!                                  " -ForegroundColor Green
     Write-Host "  =========================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  安装耗时: ${minutes}分${seconds}秒" -ForegroundColor Gray
@@ -604,9 +768,17 @@ function Show-Completion {
 # ===== 主流程 =====
 Show-Banner
 
+# 根据是否安装 Ollama 调整总步数
+if ($WithOllama) {
+    $script:TotalSteps = 8
+    $script:StepNames += "Ollama 安装"
+}
+
 if ($DockerMode) {
+    $script:TotalSteps = 3
     Test-SystemRequirements
     Install-DockerMode
+    Show-Completion
 } else {
     Test-SystemRequirements
     Install-WSL2
@@ -615,6 +787,5 @@ if ($DockerMode) {
     Install-Ollama
     Import-Config
     Test-Installation
+    Show-Completion
 }
-
-Show-Completion
