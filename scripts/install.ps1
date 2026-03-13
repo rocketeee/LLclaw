@@ -113,7 +113,8 @@ function Write-Info  { param($msg) $ts = Get-Date -Format "HH:mm:ss"; Write-Host
 function Invoke-WslScript {
     param(
         [string[]]$Lines,
-        [string]$Description = "WSL script"
+        [string]$Description = "WSL script",
+        [switch]$ShowSpinner
     )
 
     $scriptContent = ($Lines -join "`n") + "`n"
@@ -127,17 +128,72 @@ function Invoke-WslScript {
     $wslFilePath = "/mnt/$driveLetter$restPath"
     $wslTempPath = "/tmp/llclaw_" + (Get-Random) + ".sh"
 
+    $spinChars = @([char]9615, [char]9614, [char]9613, [char]9612, [char]9611, [char]9610, [char]9609, [char]9608)
+    $spinIdx = 0
+    $spinStart = Get-Date
+    $lastActivity = ""
+
     try {
         wsl -- bash -c "cp '$wslFilePath' '$wslTempPath' && chmod +x '$wslTempPath' && bash '$wslTempPath' 2>&1; EC=`$?; rm -f '$wslTempPath'; exit `$EC" 2>&1 | ForEach-Object {
             $line = $_.ToString()
-            if ($line -match "^\[OK\]") { Write-OK ($line -replace "^\[OK\]\s*", "") }
-            elseif ($line -match "^\[FAIL\]") { Write-Err ($line -replace "^\[FAIL\]\s*", "") }
-            elseif ($line -match "^\[WARN\]") { Write-Warn ($line -replace "^\[WARN\]\s*", "") }
-            elseif ($line -match "^\[LLclaw\]") { Write-Step ($line -replace "^\[LLclaw\]\s*", "") }
+
+            # 解析进度标记 [PROGRESS:xx] 或 [ACTIVITY:描述]
+            if ($line -match "^\[PROGRESS:(\d+)\]") {
+                $pctVal = [int]$Matches[1]
+                $elapsed = [math]::Round(((Get-Date) - $spinStart).TotalSeconds)
+                $barW = 30
+                $fillW = [math]::Floor($barW * $pctVal / 100)
+                $emptyW = $barW - $fillW
+                $pBar = ([string][char]9608) * $fillW + ([string][char]9617) * $emptyW
+                $ts = Get-Date -Format "HH:mm:ss"
+                Write-Host "`r[$ts] [ .... ] [$pBar] $pctVal% ${elapsed}s $lastActivity          " -ForegroundColor DarkCyan -NoNewline
+            }
+            elseif ($line -match "^\[ACTIVITY:(.+)\]") {
+                $lastActivity = $Matches[1]
+                if ($ShowSpinner) {
+                    $elapsed = [math]::Round(((Get-Date) - $spinStart).TotalSeconds)
+                    $spinChar = $spinChars[$spinIdx % $spinChars.Count]
+                    $spinIdx++
+                    $ts = Get-Date -Format "HH:mm:ss"
+                    Write-Host "`r[$ts] [ $spinChar    ] ${elapsed}s $lastActivity          " -ForegroundColor DarkCyan -NoNewline
+                }
+            }
+            elseif ($line -match "^\[OK\]") {
+                if ($ShowSpinner -or $lastActivity) { Write-Host "" }
+                Write-OK ($line -replace "^\[OK\]\s*", "")
+                $lastActivity = ""
+            }
+            elseif ($line -match "^\[FAIL\]") {
+                if ($ShowSpinner -or $lastActivity) { Write-Host "" }
+                Write-Err ($line -replace "^\[FAIL\]\s*", "")
+            }
+            elseif ($line -match "^\[WARN\]") {
+                if ($ShowSpinner -or $lastActivity) { Write-Host "" }
+                Write-Warn ($line -replace "^\[WARN\]\s*", "")
+            }
+            elseif ($line -match "^\[LLclaw\]") {
+                if ($ShowSpinner -or $lastActivity) { Write-Host "" }
+                Write-Step ($line -replace "^\[LLclaw\]\s*", "")
+            }
             elseif ($line.Trim() -match "^\d+$") { <# 忽略纯数字行 #> }
-            else { Write-Info "  $line" }
+            elseif ($ShowSpinner -and $line.Trim()) {
+                # 旋转动画模式：不逐行输出，只更新状态行
+                $elapsed = [math]::Round(((Get-Date) - $spinStart).TotalSeconds)
+                $spinChar = $spinChars[$spinIdx % $spinChars.Count]
+                $spinIdx++
+                $shortLine = $line.Trim()
+                if ($shortLine.Length -gt 50) { $shortLine = $shortLine.Substring(0, 47) + "..." }
+                $ts = Get-Date -Format "HH:mm:ss"
+                Write-Host "`r[$ts] [ $spinChar    ] ${elapsed}s $shortLine          " -ForegroundColor DarkCyan -NoNewline
+            }
+            else {
+                if ($line.Trim()) { Write-Info "  $line" }
+            }
         }
+        # 清除旋转行
+        if ($ShowSpinner) { Write-Host "`r                                                                                " -NoNewline; Write-Host "" }
     } catch {
+        Write-Host ""
         Write-Err "WSL 脚本执行失败: $_"
     } finally {
         Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
@@ -438,23 +494,34 @@ function Install-NodeJS {
         ''
         'echo "[LLclaw] 正在安装 Node.js ' + $NodeVersion + '..."'
         ''
-        'sudo apt-get update -qq'
-        'curl -fsSL https://deb.nodesource.com/setup_' + $NodeVersion + '.x | sudo -E bash -'
-        'sudo apt-get install -y nodejs'
+        'echo "[ACTIVITY:更新软件包列表...]"'
+        'echo "[PROGRESS:10]"'
+        'sudo apt-get update -qq 2>&1'
+        ''
+        'echo "[ACTIVITY:下载 Node.js ' + $NodeVersion + ' 安装源...]"'
+        'echo "[PROGRESS:30]"'
+        'curl -fsSL https://deb.nodesource.com/setup_' + $NodeVersion + '.x | sudo -E bash - 2>&1'
+        ''
+        'echo "[ACTIVITY:安装 Node.js ' + $NodeVersion + '...]"'
+        'echo "[PROGRESS:60]"'
+        'sudo apt-get install -y nodejs 2>&1'
+        ''
+        'echo "[PROGRESS:90]"'
     )
 
     if ($npmRegistry) {
+        $scriptLines += 'echo "[ACTIVITY:配置 npm 镜像源...]"'
         $scriptLines += 'npm config set registry ' + $npmRegistry
         $scriptLines += 'echo "[OK] npm 镜像源已设置"'
     }
 
     $scriptLines += @(
-        ''
+        'echo "[PROGRESS:100]"'
         'echo "[OK] Node.js $(node --version) 安装完成"'
         'echo "[OK] npm $(npm --version)"'
     )
 
-    Invoke-WslScript -Lines $scriptLines -Description "Node.js installation"
+    Invoke-WslScript -Lines $scriptLines -Description "Node.js installation" -ShowSpinner
 
     Write-OK "Node.js $NodeVersion 安装完成"
 }
@@ -476,10 +543,14 @@ function Install-OpenClaw {
         'set -e'
         ''
         'echo "[LLclaw] 正在安装 OpenClaw..."'
+        'echo "[ACTIVITY:下载并安装 OpenClaw...]"'
+        'echo "[PROGRESS:20]"'
         'npm install -g openclaw@' + $OpenClawVersion + ' ' + $registryFlag + ' 2>&1'
         ''
+        'echo "[PROGRESS:60]"'
         'echo "[OK] OpenClaw 安装完成"'
         ''
+        'echo "[ACTIVITY:创建配置目录...]"'
         'mkdir -p ~/.openclaw'
         'mkdir -p ~/.openclaw/backups'
         'mkdir -p ~/.openclaw/logs'
@@ -520,11 +591,14 @@ function Install-OpenClaw {
         '    echo "[OK] 默认配置已生成: ~/.openclaw/openclaw.json"'
         'fi'
         ''
+        'echo "[ACTIVITY:运行初始化向导...]"'
+        'echo "[PROGRESS:80]"'
         'echo "[LLclaw] 正在运行初始化向导..."'
         'openclaw onboard --install-daemon 2>&1 || echo "[WARN] 初始化向导已跳过 (稍后运行 openclaw onboard)"'
+        'echo "[PROGRESS:100]"'
     )
 
-    Invoke-WslScript -Lines $scriptLines -Description "OpenClaw installation"
+    Invoke-WslScript -Lines $scriptLines -Description "OpenClaw installation" -ShowSpinner
 
     Write-OK "OpenClaw 安装完成"
 }
@@ -544,6 +618,8 @@ function Install-Ollama {
         '    exit 0'
         'fi'
         ''
+        'echo "[ACTIVITY:下载并安装 Ollama...]"'
+        'echo "[PROGRESS:20]"'
         'echo "[LLclaw] 正在下载并安装 Ollama..."'
         'curl -fsSL https://ollama.com/install.sh | sh'
         ''
@@ -553,13 +629,16 @@ function Install-Ollama {
         'ollama serve &>/dev/null &'
         'sleep 2'
         ''
+        'echo "[ACTIVITY:拉取推荐模型 qwen2.5:7b...]"'
+        'echo "[PROGRESS:60]"'
         'echo "[LLclaw] 正在拉取推荐模型 (qwen2.5:7b)..."'
         'ollama pull qwen2.5:7b 2>&1 || echo "[WARN] 模型拉取失败, 请手动执行: ollama pull qwen2.5:7b"'
         ''
+        'echo "[PROGRESS:100]"'
         'echo "[OK] Ollama 配置完成"'
     )
 
-    Invoke-WslScript -Lines $scriptLines -Description "Ollama installation"
+    Invoke-WslScript -Lines $scriptLines -Description "Ollama installation" -ShowSpinner
 
     Write-OK "Ollama 安装完成"
 }
