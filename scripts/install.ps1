@@ -176,6 +176,34 @@ function Invoke-WslScript {
                 Write-Step ($line -replace "^\[LLclaw\]\s*", "")
             }
             elseif ($line.Trim() -match "^\d+$") { <# 忽略纯数字行 #> }
+            elseif ($line -match "^\[HEARTBEAT\]") {
+                # 心跳信号: 更新旋转动画
+                if ($ShowSpinner) {
+                    $elapsed = [math]::Round(((Get-Date) - $spinStart).TotalSeconds)
+                    $spinChar = $spinChars[$spinIdx % $spinChars.Count]
+                    $spinIdx++
+                    $ts = Get-Date -Format "HH:mm:ss"
+                    $actLabel = if ($lastActivity) { $lastActivity } else { "处理中..." }
+                    Write-Host "`r[$ts] [ $spinChar    ] ${elapsed}s $actLabel          " -ForegroundColor DarkCyan -NoNewline
+                }
+            }
+            elseif ($line -match "^\[DETAIL\]\s*(.*)$") {
+                # 详细输出: 旋转模式下显示为动画, 普通模式下显示为 INFO
+                if ($ShowSpinner) {
+                    $elapsed = [math]::Round(((Get-Date) - $spinStart).TotalSeconds)
+                    $spinChar = $spinChars[$spinIdx % $spinChars.Count]
+                    $spinIdx++
+                    $shortLine = $Matches[1].Trim()
+                    if ($shortLine.Length -gt 50) { $shortLine = $shortLine.Substring(0, 47) + "..." }
+                    if ($shortLine) {
+                        $ts = Get-Date -Format "HH:mm:ss"
+                        Write-Host "`r[$ts] [ $spinChar    ] ${elapsed}s $shortLine          " -ForegroundColor DarkCyan -NoNewline
+                    }
+                } else {
+                    $detail = $Matches[1].Trim()
+                    if ($detail) { Write-Info "  $detail" }
+                }
+            }
             elseif ($ShowSpinner -and $line.Trim()) {
                 # 旋转动画模式：不逐行输出，只更新状态行
                 $elapsed = [math]::Round(((Get-Date) - $spinStart).TotalSeconds)
@@ -483,11 +511,23 @@ function Install-NodeJS {
         '#!/bin/bash'
         'set -e'
         ''
+        '# 心跳进程: 每2秒输出一次, 确保 PowerShell 端持续收到输出'
+        'heartbeat() {'
+        '    while true; do'
+        '        sleep 2'
+        '        echo "[HEARTBEAT]"'
+        '    done'
+        '}'
+        'heartbeat &'
+        'HB_PID=$!'
+        'trap "kill $HB_PID 2>/dev/null" EXIT'
+        ''
         'if command -v node &>/dev/null; then'
         '    CURRENT=$(node --version | cut -d. -f1 | tr -d v)'
         '    if [ "$CURRENT" -ge "' + $NodeVersion + '" ]; then'
         '        echo "[OK] Node.js $(node --version) 已安装"'
         '        echo "[OK] npm $(npm --version)"'
+        '        kill $HB_PID 2>/dev/null'
         '        exit 0'
         '    fi'
         'fi'
@@ -496,15 +536,15 @@ function Install-NodeJS {
         ''
         'echo "[ACTIVITY:更新软件包列表...]"'
         'echo "[PROGRESS:10]"'
-        'sudo apt-get update -qq 2>&1'
+        'sudo apt-get update -qq 2>&1 | while IFS= read -r line; do echo "[DETAIL] $line"; done'
         ''
         'echo "[ACTIVITY:下载 Node.js ' + $NodeVersion + ' 安装源...]"'
         'echo "[PROGRESS:30]"'
-        'curl -fsSL https://deb.nodesource.com/setup_' + $NodeVersion + '.x | sudo -E bash - 2>&1'
+        'curl -fsSL https://deb.nodesource.com/setup_' + $NodeVersion + '.x | sudo -E bash - 2>&1 | while IFS= read -r line; do echo "[DETAIL] $line"; done'
         ''
         'echo "[ACTIVITY:安装 Node.js ' + $NodeVersion + '...]"'
         'echo "[PROGRESS:60]"'
-        'sudo apt-get install -y nodejs 2>&1'
+        'sudo apt-get install -y nodejs 2>&1 | while IFS= read -r line; do echo "[DETAIL] $line"; done'
         ''
         'echo "[PROGRESS:90]"'
     )
@@ -542,10 +582,21 @@ function Install-OpenClaw {
         '#!/bin/bash'
         'set -e'
         ''
+        '# 心跳进程'
+        'heartbeat() {'
+        '    while true; do'
+        '        sleep 2'
+        '        echo "[HEARTBEAT]"'
+        '    done'
+        '}'
+        'heartbeat &'
+        'HB_PID=$!'
+        'trap "kill $HB_PID 2>/dev/null" EXIT'
+        ''
         'echo "[LLclaw] 正在安装 OpenClaw..."'
         'echo "[ACTIVITY:下载并安装 OpenClaw...]"'
         'echo "[PROGRESS:20]"'
-        'npm install -g openclaw@' + $OpenClawVersion + ' ' + $registryFlag + ' 2>&1'
+        'npm install -g openclaw@' + $OpenClawVersion + ' ' + $registryFlag + ' 2>&1 | while IFS= read -r line; do echo "[DETAIL] $line"; done'
         ''
         'echo "[PROGRESS:60]"'
         'echo "[OK] OpenClaw 安装完成"'
